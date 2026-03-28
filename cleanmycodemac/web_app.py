@@ -807,11 +807,11 @@ function safetyBadge(is_safe, size) {
   return '<span class="badge badge-warn">' + T('badgeWarn') + '</span>';
 }
 
-async function loadResult() {
+async function loadResult(showResultView = true) {
   resultData = await fetch('/api/scan/result').then(r => r.json());
   if (!resultData) return;
   renderResult();
-  showView('result');
+  if (showResultView) showView('result');
   loadDisk();
 }
 
@@ -1277,8 +1277,9 @@ async function switchLang(lang) {
   currentLang = lang;
   await postJson('/api/lang', { lang: lang });
   applyLang();
-  if (resultData) {
-    await loadResult();
+  const resultViewVisible = !document.getElementById('view-result').classList.contains('hidden');
+  if (resultData && resultViewVisible) {
+    await loadResult(false);
   }
 }
 
