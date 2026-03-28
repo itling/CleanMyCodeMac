@@ -137,6 +137,16 @@ def _docker_analysis(path: Path) -> Dict:
             "command": "docker volume prune",
             "description": t("analyzer.docker_prune_volumes_desc"),
         },
+        {
+            "label": t("analyzer.docker_force_remove_images"),
+            "command": "docker rmi -f $(docker images -q)",
+            "description": t("analyzer.docker_force_remove_images_desc"),
+        },
+        {
+            "label": t("analyzer.docker_prune_all"),
+            "command": "docker system prune -a -f",
+            "description": t("analyzer.docker_prune_all_desc"),
+        },
     ]
 
     return {
