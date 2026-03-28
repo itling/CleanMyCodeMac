@@ -139,7 +139,7 @@ def _docker_analysis(path: Path) -> Dict:
         },
         {
             "label": t("analyzer.docker_force_remove_images"),
-            "command": "docker rmi -f $(docker images -q)",
+            "command": "ids=$(docker images -q); if [ -n \"$ids\" ]; then docker rmi -f $ids; else echo \"No images to remove\"; fi",
             "description": t("analyzer.docker_force_remove_images_desc"),
         },
         {
