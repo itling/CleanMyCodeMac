@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+
+# macOS
+.DS_Store
+*.icns
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# PyInstaller
+*.manifest
+*.spec.bak
+
+# App config (user-specific)
+.cleanmycodemac_config.json
+
+# Claude Code
+.claude/
+
+# Generated icons (can be rebuilt)
+resources/generated_icons/
+resources/app_icon.ppm
