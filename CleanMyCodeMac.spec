@@ -60,6 +60,8 @@ app = BUNDLE(
         "CFBundleDisplayName": "CleanMyCodeMac",
         "CFBundleShortVersionString": "1.0.0",
         "CFBundleVersion": "1.0.0",
+        "CFBundleIconFile": "app.icns",
+        "NSHumanReadableCopyright": "Copyright © 2025 killy. All rights reserved.",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
     },

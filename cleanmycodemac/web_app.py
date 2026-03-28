@@ -270,8 +270,8 @@ def start_server(port=9527):
     window = webview.create_window(
         "CleanMyCodeMac",
         f"http://127.0.0.1:{port}",
-        width=960,
-        height=680,
+        width=1120,
+        height=720,
         min_size=(800, 500),
     )
     webview.start()
@@ -472,12 +472,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
     </div>
     <div class="disk-info" id="disk-info">加载中...</div>
     <div class="perm-status" id="perm-status"></div>
-    <div class="version">
-      <span class="about-label">关于</span>
-      <div>v1.0.0</div>
-      <div>作者：killy</div>
-      <div>邮箱：3168582@qq.com</div>
-    </div>
+    <div class="version">v1.0.0</div>
   </div>
 
   <div class="main">
@@ -744,7 +739,7 @@ function renderResult() {
         '<span class="sub-right">' +
           '<span class="sub-size">' + sg.size_display + '</span>' +
           safetyBadge(sg.is_safe, sg.size) +
-          '<span class="sub-toggle' + (sg.file_count === 1 ? ' open' : '') + '" title="展开文件列表">&#9660;</span>' +
+          '<span class="sub-toggle" title="展开文件列表">&#9660;</span>' +
         '</span>';
 
       const cb = subRow.querySelector('.sub-cb');
@@ -758,7 +753,7 @@ function renderResult() {
       body.appendChild(subRow);
 
       const filesDiv = document.createElement('div');
-      filesDiv.className = 'file-details' + (sg.file_count > 1 ? ' hidden' : '');
+      filesDiv.className = 'file-details hidden';
       for (const f of sg.files) {
         const frow = document.createElement('div');
         frow.className = 'file-row';
@@ -767,11 +762,10 @@ function renderResult() {
           ' data-path="' + escapeHtml(f.path) + '">' +
           '<div class="file-path-wrap">' +
             '<div class="file-path" title="' + escapeHtml(f.path) + '">' + escapeHtml(f.path_short) + '</div>' +
-            '<div class="file-hint">' + escapeHtml(cat === 'large_file' ? '可定位、可分析' : '可用 Finder 快速定位') + '</div>' +
           '</div>' +
           '<span class="file-size">' + f.size_display + '</span>' +
           '<span class="file-actions">' +
-            '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">Finder</button>' +
+            '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">打开</button>' +
             (f.can_analyze ? '<button class="btn-mini" data-action="analyze" data-path="' + escapeHtml(f.path) + '">分析</button>' : '') +
           '</span>';
         const fcb = frow.querySelector('.file-cb');
