@@ -3,6 +3,7 @@
 import json
 import threading
 import queue
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
@@ -38,6 +39,21 @@ scan_progress = {"status": "idle", "percent": 0, "label": "", "logs": []}
 scan_queue = queue.Queue()
 scanner = None
 scan_options = {"categories": list(CLEANER_MAP.keys())}
+
+
+class AppBridge:
+    def __init__(self):
+        self.window = None
+        self._shown = False
+
+    def bind_window(self, window):
+        self.window = window
+
+    def on_bootstrap_ready(self):
+        if self.window and not self._shown:
+            self.window.show()
+            self._shown = True
+        return {"ok": True}
 
 
 def _serialize_scan_result(result: ScanResult | None):
@@ -289,13 +305,18 @@ def start_server(port=9527):
     server_thread.start()
     print(f"CleanMyCodeMac backend started: http://127.0.0.1:{port}")
 
+    bridge = AppBridge()
     window = webview.create_window(
         "CleanMyCodeMac",
         f"http://127.0.0.1:{port}",
+        js_api=bridge,
         width=1120,
         height=720,
         min_size=(800, 500),
+        hidden=True,
+        background_color="#0F172A",
     )
+    bridge.bind_window(window)
 
     webview.start()
     print("Exited")
@@ -479,9 +500,51 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .toast-success { border-color: #BBF7D0; }
 
 .hidden { display: none; }
+.startup-screen { position: fixed; inset: 0; z-index: 60; background:
+  radial-gradient(circle at top, rgba(249,115,22,0.22), transparent 35%),
+  linear-gradient(145deg, #0F172A 0%, #111827 45%, #1E293B 100%);
+  color: #F8FAFC; display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.35s ease, visibility 0.35s ease; }
+.startup-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; display: flex; }
+.startup-card { width: min(420px, calc(100vw - 48px)); text-align: center; }
+.startup-orb { width: 96px; height: 96px; margin: 0 auto 20px; border-radius: 28px;
+  background: linear-gradient(145deg, rgba(249,115,22,0.95), rgba(251,146,60,0.82));
+  box-shadow: 0 20px 50px rgba(249,115,22,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
+  position: relative; display: flex; align-items: center; justify-content: center; }
+.startup-orb::after { content: ''; width: 54px; height: 54px; border-radius: 18px;
+  border: 3px solid rgba(255,255,255,0.9); box-sizing: border-box; }
+.startup-glow { position: absolute; inset: -14px; border-radius: 34px; border: 1px solid rgba(251,146,60,0.28);
+  animation: startupPulse 1.8s ease-in-out infinite; }
+.startup-title { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; margin-bottom: 10px; }
+.startup-subtitle { font-size: 14px; line-height: 1.7; color: #CBD5E1; margin-bottom: 20px; }
+.startup-bar { width: 220px; max-width: 100%; height: 6px; margin: 0 auto 12px; border-radius: 999px;
+  overflow: hidden; background: rgba(148,163,184,0.18); }
+.startup-bar-fill { width: 38%; height: 100%;
+  background: linear-gradient(90deg, rgba(249,115,22,0.1), #F97316, #FDBA74, rgba(249,115,22,0.1));
+  animation: startupSweep 1.5s ease-in-out infinite; }
+.startup-caption { font-size: 12px; color: #94A3B8; letter-spacing: 0.08em; text-transform: uppercase; }
+@keyframes startupSweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+@keyframes startupPulse {
+  0%, 100% { transform: scale(0.98); opacity: 0.5; }
+  50% { transform: scale(1.03); opacity: 1; }
+}
 </style>
 </head>
 <body>
+<div id="startup-screen" class="startup-screen">
+  <div class="startup-card">
+    <div class="startup-orb">
+      <div class="startup-glow"></div>
+    </div>
+    <div class="startup-title">CleanMyCodeMac</div>
+    <div class="startup-subtitle">Inspecting local storage, preparing cleanup tools, and loading the desktop shell.</div>
+    <div class="startup-bar"><div class="startup-bar-fill"></div></div>
+    <div class="startup-caption">Starting Up</div>
+  </div>
+</div>
 <div class="app">
   <div class="sidebar">
     <h2>CleanMyCodeMac</h2>
@@ -685,6 +748,7 @@ const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'dev_cache', 'download', 
 let resultData = null;
 let scanSelections = {};
 let dialogResolver = null;
+const startupStartedAt = Date.now();
 
 function showView(name) {
   document.querySelectorAll('.main > div').forEach(v => { v.classList.add('hidden'); v.style.display = 'none'; });
@@ -739,7 +803,7 @@ async function loadDisk() {
   document.getElementById('gauge-pct').textContent = Math.round(pct) + '%';
   const arc = document.getElementById('gauge-arc');
   arc.style.strokeDashoffset = 236 - 236 * (pct / 100);
-  arc.style.stroke = pct < 60 ? '#10B981' : pct < 85 ? '#F59E0B' : '#EF4444';
+  arc.style.stroke = pct < 70 ? '#10B981' : pct <= 90 ? '#F59E0B' : '#EF4444';
   const usedG = (r.used / 1073741824).toFixed(1);
   const totalG = (r.total / 1073741824).toFixed(1);
   const freeG = (r.free / 1073741824).toFixed(1);
@@ -1239,6 +1303,29 @@ function closeAnalysis(event) {
 
 function escapeHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+async function notifyBootstrapReady() {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 4000) {
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.on_bootstrap_ready) {
+        await window.pywebview.api.on_bootstrap_ready();
+        return;
+      }
+    } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
+
+async function hideStartupScreen() {
+  const minVisibleMs = 650;
+  const elapsed = Date.now() - startupStartedAt;
+  if (elapsed < minVisibleMs) {
+    await new Promise(resolve => setTimeout(resolve, minVisibleMs - elapsed));
+  }
+  const startup = document.getElementById('startup-screen');
+  startup.classList.add('hidden');
+}
+
 function renderLangSwitch() {
   const el = document.getElementById('lang-switch');
   el.innerHTML =
@@ -1293,6 +1380,8 @@ initLang().then(() => {
   initScopes();
   loadDisk();
   loadPerm();
+  notifyBootstrapReady();
+  hideStartupScreen();
 });
 </script>
 </body>

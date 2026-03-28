@@ -7,16 +7,70 @@ VENV_DIR="${VENV_DIR:-$PROJECT_DIR/venv}"
 PYTHON_BIN="${PYTHON_BIN:-$VENV_DIR/bin/python3}"
 PIP_BIN="${PIP_BIN:-$VENV_DIR/bin/pip3}"
 APP_NAME="CleanMyCodeMac"
-APP_BUNDLE="$PROJECT_DIR/dist/$APP_NAME.app"
-DMG_STAGING_DIR="$PROJECT_DIR/dist/dmg"
-DMG_NAME="${APP_NAME}.dmg"
-DMG_PATH="$PROJECT_DIR/dist/$DMG_NAME"
+DIST_ROOT="$PROJECT_DIR/dist"
+BUILD_ROOT="$PROJECT_DIR/build"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "缺少命令: $1"
     exit 1
   fi
+}
+
+normalize_arch() {
+  case "$1" in
+    x86_64|amd64)
+      echo "x86_64"
+      ;;
+    arm64|aarch64)
+      echo "arm64"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+build_one_arch() {
+  local arch="$1"
+  local dist_dir="$DIST_ROOT/$arch"
+  local build_dir="$BUILD_ROOT/$arch"
+  local app_bundle="$dist_dir/$APP_NAME.app"
+  local dmg_staging_dir="$dist_dir/dmg"
+  local dmg_name="${APP_NAME}-${arch}.dmg"
+  local dmg_path="$DIST_ROOT/$dmg_name"
+
+  echo "清理旧产物 ($arch)..."
+  rm -rf "$build_dir" "$dist_dir" "$dmg_path"
+
+  echo "构建 .app ($arch) ..."
+  PYINSTALLER_TARGET_ARCH="$arch" "$PYTHON_BIN" -m PyInstaller \
+    --noconfirm \
+    --clean \
+    --distpath "$dist_dir" \
+    --workpath "$build_dir" \
+    "$PROJECT_DIR/CleanMyCodeMac.spec"
+
+  if [[ ! -d "$app_bundle" ]]; then
+    echo "构建失败，未生成应用包: $app_bundle"
+    exit 1
+  fi
+
+  mkdir -p "$dmg_staging_dir"
+  cp -R "$app_bundle" "$dmg_staging_dir/"
+  ln -sfn /Applications "$dmg_staging_dir/Applications"
+
+  echo "生成 .dmg ($arch) ..."
+  hdiutil create \
+    -volname "$APP_NAME $arch" \
+    -srcfolder "$dmg_staging_dir" \
+    -ov \
+    -format UDZO \
+    "$dmg_path"
+
+  echo "构建完成 ($arch):"
+  echo "APP: $app_bundle"
+  echo "DMG: $dmg_path"
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -46,30 +100,31 @@ if ! "$PYTHON_BIN" -c "import PyInstaller" >/dev/null 2>&1; then
   "$PIP_BIN" install -r "$PROJECT_DIR/requirements-build.txt"
 fi
 
-echo "清理旧产物..."
-rm -rf "$PROJECT_DIR/build" "$PROJECT_DIR/dist"
-
-echo "构建 .app ..."
-"$PYTHON_BIN" -m PyInstaller --noconfirm "$PROJECT_DIR/CleanMyCodeMac.spec"
-
-if [[ ! -d "$APP_BUNDLE" ]]; then
-  echo "构建失败，未生成应用包: $APP_BUNDLE"
-  exit 1
+ARCH_INPUTS=("$@")
+if [[ ${#ARCH_INPUTS[@]} -eq 0 ]]; then
+  ARCH_INPUTS=("$(uname -m)")
 fi
 
-mkdir -p "$DMG_STAGING_DIR"
-cp -R "$APP_BUNDLE" "$DMG_STAGING_DIR/"
-ln -sfn /Applications "$DMG_STAGING_DIR/Applications"
+ARCHS=()
+for arch_input in "${ARCH_INPUTS[@]}"; do
+  if [[ "$arch_input" == "all" ]]; then
+    ARCHS+=("x86_64" "arm64")
+    continue
+  fi
+  normalized_arch="$(normalize_arch "$arch_input")"
+  if [[ -z "$normalized_arch" ]]; then
+    echo "不支持的架构参数: $arch_input"
+    echo "可用值: x86_64, arm64, all"
+    exit 1
+  fi
+  ARCHS+=("$normalized_arch")
+done
 
-echo "生成 .dmg ..."
-hdiutil create \
-  -volname "$APP_NAME" \
-  -srcfolder "$DMG_STAGING_DIR" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH"
-
-echo "构建完成:"
-echo "APP: $APP_BUNDLE"
-echo "DMG: $DMG_PATH"
-
+SEEN_ARCHS=""
+for arch in "${ARCHS[@]}"; do
+  if [[ " $SEEN_ARCHS " == *" $arch "* ]]; then
+    continue
+  fi
+  SEEN_ARCHS="$SEEN_ARCHS $arch"
+  build_one_arch "$arch"
+done

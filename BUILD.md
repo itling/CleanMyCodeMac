@@ -17,10 +17,25 @@ chmod +x build_dmg.sh
 ./build_dmg.sh
 ```
 
-构建完成后会生成：
+默认会按当前机器架构生成一套产物，例如：
 
-- `dist/CleanMyCodeMac.app`
-- `dist/CleanMyCodeMac.dmg`
+- `dist/x86_64/CleanMyCodeMac.app`
+- `dist/CleanMyCodeMac-x86_64.dmg`
+
+也可以显式指定架构：
+
+```bash
+./build_dmg.sh x86_64
+./build_dmg.sh arm64
+./build_dmg.sh all
+```
+
+生成双架构产物时会输出：
+
+- `dist/x86_64/CleanMyCodeMac.app`
+- `dist/CleanMyCodeMac-x86_64.dmg`
+- `dist/arm64/CleanMyCodeMac.app`
+- `dist/CleanMyCodeMac-arm64.dmg`
 
 ## 应用图标
 
@@ -45,6 +60,7 @@ PYTHON_BIN=/path/to/python3 PIP_BIN=/path/to/pip3 ./build_dmg.sh
 
 - 构建脚本会在检测到缺少 `PyInstaller` 时自动安装 `requirements-build.txt` 中的依赖。
 - `dmg` 内会包含 `CleanMyCodeMac.app` 和指向 `/Applications` 的快捷方式，便于用户拖拽安装。
+- 生成 `arm64` / `x86_64` 时，当前 Python 与 PyInstaller 环境需要支持目标架构，否则 PyInstaller 会报错。
 
 ## 签名与公证
 

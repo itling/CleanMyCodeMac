@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -8,6 +9,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 project_root = Path(SPECPATH)
 app_root = project_root / "cleanmycodemac"
 icon_path = project_root / "resources" / "app.icns"
+target_arch = os.environ.get("PYINSTALLER_TARGET_ARCH") or None
 
 hiddenimports = collect_submodules("webview")
 datas = collect_data_files("webview")
@@ -38,6 +40,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    target_arch=target_arch,
 )
 
 coll = COLLECT(
