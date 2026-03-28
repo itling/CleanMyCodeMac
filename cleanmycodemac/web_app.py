@@ -585,7 +585,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 const UI = {
   zh: {
     used: '已使用', loading: '加载中...', heroDesc: '扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间',
-    startScan: '开始扫描', selectAll: '全选范围', clearAll: '清空范围',
+    startScan: '开始扫描', selectAll: '全选', clearAll: '清空',
     scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
     scanning: '正在扫描...', initializing: '初始化中...', scopeLabel: '范围',
     foundFiles: '共发现可清理文件', selectedJunk: '已选择垃圾',
@@ -625,7 +625,7 @@ const UI = {
   },
   en: {
     used: 'Used', loading: 'Loading...', heroDesc: 'Scan and clean junk files on your Mac to free up disk space',
-    startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear All',
+    startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear',
     scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
     scanning: 'Scanning...', initializing: 'Initializing...', scopeLabel: 'Scope',
     foundFiles: 'Cleanable files found', selectedJunk: 'Selected',
