@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from models.scan_item import format_size
 from utils.subprocess_utils import get_dir_size, run
+from utils.i18n import t
 
 
 def _path_size(path: Path) -> int:
@@ -122,28 +123,28 @@ def _docker_analysis(path: Path) -> Dict:
 
     suggestions = [
         {
-            "label": "清理未使用镜像",
+            "label": t("analyzer.docker_prune_images"),
             "command": "docker image prune -a",
-            "description": "删除未被容器使用的镜像，通常是 Docker.raw 膨胀的主要来源之一。",
+            "description": t("analyzer.docker_prune_images_desc"),
         },
         {
-            "label": "清理停止容器",
+            "label": t("analyzer.docker_prune_containers"),
             "command": "docker container prune",
-            "description": "删除已停止容器，释放容器层占用。",
+            "description": t("analyzer.docker_prune_containers_desc"),
         },
         {
-            "label": "清理未使用卷",
+            "label": t("analyzer.docker_prune_volumes"),
             "command": "docker volume prune",
-            "description": "删除未被容器使用的数据卷，适合卷占用过大的情况。",
+            "description": t("analyzer.docker_prune_volumes_desc"),
         },
     ]
 
     return {
         "kind": "docker_raw",
-        "title": "Docker 空间分析",
+        "title": t("analyzer.docker_title"),
         "highlights": [
-            f"Docker.raw 是 Docker Desktop 的虚拟磁盘文件，当前文件大小为 {format_size(path.stat().st_size)}。",
-            "这个文件本身是容器、镜像和卷数据的聚合载体，建议按 Docker 资源类型清理，而不是直接删除该文件。",
+            t("analyzer.docker_desc", size=format_size(path.stat().st_size)),
+            t("analyzer.docker_hint"),
         ],
         "docker_cli_available": available,
         "docker_df_lines": summary_lines,
@@ -155,12 +156,12 @@ def _docker_analysis(path: Path) -> Dict:
 def analyze_path(path_str: str) -> Dict:
     path = Path(path_str).expanduser()
     if not path.exists():
-        return {"error": "文件不存在"}
+        return {"error": t("analyzer.file_not_found")}
 
     try:
         size = _path_size(path)
     except OSError:
-        return {"error": "无法读取文件信息"}
+        return {"error": t("analyzer.read_error")}
 
     tree_root = path if path.is_dir() else path.parent
     tree_total = size if path.is_dir() else _path_size(path.parent)
@@ -184,13 +185,13 @@ def analyze_path(path_str: str) -> Dict:
             result["special"] = _docker_analysis(path)
         else:
             result["highlights"] = [
-                f"这是一个单文件占用项，文件大小为 {format_size(size)}。",
-                f"下方树状视图展示的是它所在目录 {path.parent.name or path.parent} 的空间分布。",
+                t("analyzer.single_file", size=format_size(size)),
+                t("analyzer.single_file_tree", dir=path.parent.name or str(path.parent)),
             ]
     else:
         result["highlights"] = [
-            f"这是一个目录，占用 {format_size(size)}。",
-            "下方树状视图按占用大小展开到两层，便于继续定位真正的大头。",
+            t("analyzer.dir_info", size=format_size(size)),
+            t("analyzer.dir_tree"),
         ]
 
     return result

@@ -14,6 +14,10 @@ class ScanItem:
     selected: bool = True  # UI 勾选状态
     last_modified: Optional[datetime] = None
     description: str = ""
+    app_name_key: Optional[str] = None
+    app_name_args: dict = field(default_factory=dict)
+    description_key: Optional[str] = None
+    description_args: dict = field(default_factory=dict)
 
     @property
     def size_display(self) -> str:

@@ -44,6 +44,19 @@ def move_to_trash(path: Path) -> bool:
     return result.returncode == 0
 
 
+def permanently_delete(path: Path) -> bool:
+    """通过 Finder 永久删除废纸篓中的条目"""
+    escaped = str(path).replace("\\", "\\\\").replace('"', '\\"')
+    script = f'tell application "Finder" to delete POSIX file "{escaped}"'
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    return result.returncode == 0
+
+
 def mdfind_large_files(min_bytes: int = 524288000, root: str = None) -> list:
     """使用 mdfind 搜索大文件（默认 >500MB），超时 15 秒自动跳过"""
     cmd = ["mdfind"]

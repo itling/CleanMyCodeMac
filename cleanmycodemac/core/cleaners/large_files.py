@@ -5,6 +5,7 @@ from .base_cleaner import BaseCleaner
 from models.scan_item import ScanItem
 from utils.subprocess_utils import mdfind_large_files, get_file_size
 from utils.config import load_config
+from utils.i18n import t
 
 # 不扫描的目录前缀
 EXCLUDED_PREFIXES = [
@@ -20,13 +21,15 @@ EXCLUDED_PREFIXES = [
 
 class LargeFileScanner(BaseCleaner):
     CATEGORY = "large_file"
-    DISPLAY_NAME = "大文件"
+    @property
+    def DISPLAY_NAME(self):
+        return t("cat.large_file")
 
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         config = load_config()
         threshold_bytes = config.get("large_file_threshold_mb", 500) * 1024 * 1024
 
-        self._notify(progress_callback, f"正在搜索大文件（>{config['large_file_threshold_mb']}MB）...")
+        self._notify(progress_callback, t("scan.large_file", threshold=config['large_file_threshold_mb']))
 
         home = str(Path.home())
         file_paths = mdfind_large_files(
@@ -58,11 +61,13 @@ class LargeFileScanner(BaseCleaner):
                 path=path,
                 size_bytes=size,
                 category=self.CATEGORY,
-                app_name=path.suffix.upper().lstrip(".") or "文件",
+                app_name=path.suffix.upper().lstrip(".") or t("desc.file_type.file"),
                 is_safe=False,      # 大文件需用户确认
                 selected=False,     # 默认不勾选，需用户主动选择
                 last_modified=mtime,
-                description=f"大文件：{path.name}",
+                description=t("desc.large_file", name=path.name),
+                description_key="desc.large_file",
+                description_args={"name": path.name},
             ))
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

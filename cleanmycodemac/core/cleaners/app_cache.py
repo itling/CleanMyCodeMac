@@ -6,6 +6,7 @@ from models.scan_item import ScanItem
 from utils.subprocess_utils import get_dir_size
 from utils.config import load_config
 from core.app_detector import detect_installed_apps
+from utils.i18n import t
 
 # 不清理的 bundle ID 前缀（系统级）
 PROTECTED_PREFIXES = [
@@ -17,7 +18,9 @@ PROTECTED_PREFIXES = [
 
 class AppCacheCleaner(BaseCleaner):
     CATEGORY = "app_cache"
-    DISPLAY_NAME = "应用缓存"
+    @property
+    def DISPLAY_NAME(self):
+        return t("cat.app_cache")
 
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         items = []
@@ -28,7 +31,7 @@ class AppCacheCleaner(BaseCleaner):
         if not cache_root.exists():
             return items
 
-        self._notify(progress_callback, "正在扫描应用缓存...")
+        self._notify(progress_callback, t("scan.app_cache"))
 
         for cache_dir in sorted(cache_root.iterdir()):
             if not cache_dir.is_dir():
@@ -64,7 +67,9 @@ class AppCacheCleaner(BaseCleaner):
                 is_safe=is_safe,
                 selected=is_safe and auto_select_safe,
                 last_modified=mtime,
-                description=f"应用缓存：{bundle_id}",
+                description=t("desc.app_cache_bundle", bundle_id=bundle_id),
+                description_key="desc.app_cache_bundle",
+                description_args={"bundle_id": bundle_id},
             ))
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

@@ -5,6 +5,7 @@ from .base_cleaner import BaseCleaner
 from models.scan_item import ScanItem
 from utils.subprocess_utils import get_file_size
 from utils.config import load_config
+from utils.i18n import t
 
 LOG_DIRS = [
     Path.home() / "Library/Logs",
@@ -17,7 +18,9 @@ MIN_AGE_DAYS = 7
 
 class LogsCleaner(BaseCleaner):
     CATEGORY = "log"
-    DISPLAY_NAME = "日志文件"
+    @property
+    def DISPLAY_NAME(self):
+        return t("cat.log")
 
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         items = []
@@ -27,7 +30,7 @@ class LogsCleaner(BaseCleaner):
         cutoff = datetime.now() - timedelta(days=min_age_days)
         seen_paths = set()
 
-        self._notify(progress_callback, "正在扫描日志文件...")
+        self._notify(progress_callback, t("scan.log"))
 
         for log_dir in LOG_DIRS:
             if not log_dir.exists():
@@ -78,5 +81,7 @@ class LogsCleaner(BaseCleaner):
                 is_safe=True,
                 selected=auto_select_safe,
                 last_modified=mtime,
-                description=f"日志文件（{mtime.strftime('%Y-%m-%d')}）",
+                description=t("desc.log_date", date=mtime.strftime('%Y-%m-%d')),
+                description_key="desc.log_date",
+                description_args={"date": mtime.strftime('%Y-%m-%d')},
             ))

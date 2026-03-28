@@ -5,6 +5,7 @@ from .base_cleaner import BaseCleaner
 from models.scan_item import ScanItem
 from utils.subprocess_utils import get_dir_size
 from utils.config import load_config
+from utils.i18n import t
 
 # 安全可清理的系统缓存（已验证无需 FDA）
 SAFE_SYSTEM_CACHES = [
@@ -26,7 +27,9 @@ SAFE_SYSTEM_CACHES = [
 
 class SystemCacheCleaner(BaseCleaner):
     CATEGORY = "system_cache"
-    DISPLAY_NAME = "系统缓存"
+    @property
+    def DISPLAY_NAME(self):
+        return t("cat.system_cache")
 
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         items = []
@@ -34,7 +37,7 @@ class SystemCacheCleaner(BaseCleaner):
         auto_select_safe = config.get("auto_select_safe_items", True)
         cache_root = Path.home() / "Library/Caches"
 
-        self._notify(progress_callback, "正在扫描系统缓存...")
+        self._notify(progress_callback, t("scan.system_cache"))
 
         if not cache_root.exists():
             return items
@@ -61,7 +64,9 @@ class SystemCacheCleaner(BaseCleaner):
                 is_safe=True,
                 selected=auto_select_safe,
                 last_modified=mtime,
-                description=f"系统应用缓存：{name}",
+                description=t("desc.system_cache_bundle", bundle_id=name),
+                description_key="desc.system_cache_bundle",
+                description_args={"bundle_id": name},
             ))
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

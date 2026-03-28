@@ -1,17 +1,20 @@
 import os
-import shutil
+import subprocess
 from pathlib import Path
 from typing import List, Callable, Optional
 from .base_cleaner import BaseCleaner
 from models.scan_item import ScanItem
 from models.clean_report import CleanReport
-from utils.subprocess_utils import get_dir_size, run
+from utils.subprocess_utils import get_dir_size, get_file_size, permanently_delete
 from utils.config import load_config
+from utils.i18n import t
 
 
 class TrashCleaner(BaseCleaner):
     CATEGORY = "trash"
-    DISPLAY_NAME = "废纸篓"
+    @property
+    def DISPLAY_NAME(self):
+        return t("cat.trash")
 
     TRASH_PATH = Path.home() / ".Trash"
 
@@ -27,7 +30,7 @@ class TrashCleaner(BaseCleaner):
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         items = []
         auto_select_safe = load_config().get("auto_select_safe_items", True)
-        self._notify(progress_callback, "正在检查废纸篓...")
+        self._notify(progress_callback, t("scan.trash"))
 
         locations = [path for path in self._trash_locations() if path.exists()]
         if not locations:
@@ -41,30 +44,40 @@ class TrashCleaner(BaseCleaner):
                 permission_denied = True
                 continue
 
-            total_size = get_dir_size(trash_path)
-            if total_size <= 0 and not entries:
+            if not entries:
                 continue
 
-            label = "废纸篓" if trash_path == self.TRASH_PATH else f"{trash_path.parent.parent.name} 废纸篓"
-            items.append(ScanItem(
-                path=trash_path,
-                size_bytes=total_size,
-                category=self.CATEGORY,
-                app_name=label,
-                is_safe=True,
-                selected=auto_select_safe,
-                description=f"{label}中共 {len(entries)} 个项目",
-            ))
+            is_root_trash = trash_path == self.TRASH_PATH
+            label_key = "trash.label" if is_root_trash else "trash.external"
+            label_args = {} if is_root_trash else {"volume": trash_path.parent.parent.name}
+            for entry in entries:
+                try:
+                    size = get_dir_size(entry) if entry.is_dir() else get_file_size(entry)
+                except OSError:
+                    size = 0
+                items.append(ScanItem(
+                    path=entry,
+                    size_bytes=size,
+                    category=self.CATEGORY,
+                    app_name=entry.name,
+                    is_safe=True,
+                    selected=auto_select_safe,
+                    description=t(label_key, **label_args),
+                    description_key=label_key,
+                    description_args=label_args,
+                ))
 
         if not items and permission_denied:
             items.append(ScanItem(
                 path=self.TRASH_PATH,
                 size_bytes=0,
                 category=self.CATEGORY,
-                app_name="废纸篓（未授权）",
+                app_name=t("desc.trash_no_access_label"),
+                app_name_key="desc.trash_no_access_label",
                 is_safe=False,
                 selected=False,
-                description="当前运行的应用实例没有废纸篓访问权限，或 Finder 废纸篓位于其他受保护卷",
+                description=t("desc.trash_no_access"),
+                description_key="desc.trash_no_access",
             ))
 
         return items
@@ -74,27 +87,18 @@ class TrashCleaner(BaseCleaner):
         if dry_run:
             return report
 
-        # 使用 osascript 清空废纸篓（最安全的方式）
-        script = 'tell application "Finder" to empty trash'
-        result = run(["osascript", "-e", script], timeout=30)
-        if result is not None:
-            for item in items:
-                report.add_success(item.path, item.size_bytes)
-        else:
-            # 降级：直接删除废纸篓内容
+        for item in items:
             try:
-                for entry in self.TRASH_PATH.iterdir():
-                    try:
-                        if entry.is_dir():
-                            shutil.rmtree(entry)
-                        else:
-                            entry.unlink()
-                    except Exception as e:
-                        report.add_failure(entry, str(e))
-                for item in items:
-                    report.add_success(item.path, item.size_bytes)
+                if not permanently_delete(item.path):
+                    subprocess.run(
+                        ["rm", "-rf", str(item.path)],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                report.add_success(item.path, item.size_bytes)
             except Exception as e:
-                for item in items:
-                    report.add_failure(item.path, str(e))
+                report.add_failure(item.path, str(e))
 
         return report

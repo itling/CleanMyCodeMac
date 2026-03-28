@@ -6,17 +6,19 @@ import queue
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
-from core.scanner import Scanner, CATEGORY_NAMES
+from core.scanner import Scanner, get_category_names
 from core.disk_info import get_disk_info
-from core.permissions import check_full_disk_access, request_full_disk_access
+from core.permissions import check_full_disk_access, check_trash_access, request_full_disk_access
 from core.analyzer import analyze_path
 from core.cleaners import (
     SystemCacheCleaner, AppCacheCleaner, LogsCleaner,
     DownloadsAnalyzer, LargeFileScanner, TrashCleaner,
+    DevCacheCleaner, DocumentScanner, MediaScanner,
 )
 from models.scan_item import format_size
 from models.scan_result import ScanResult
 from utils.subprocess_utils import reveal_in_finder
+from utils.i18n import get_lang, set_lang, t, STRINGS
 
 CLEANER_MAP = {
     "system_cache": SystemCacheCleaner(),
@@ -25,6 +27,9 @@ CLEANER_MAP = {
     "download":     DownloadsAnalyzer(),
     "large_file":   LargeFileScanner(),
     "trash":        TrashCleaner(),
+    "dev_cache":    DevCacheCleaner(),
+    "document":     DocumentScanner(),
+    "media":        MediaScanner(),
 }
 
 # 全局状态
@@ -43,15 +48,25 @@ def _serialize_scan_result(result: ScanResult | None):
     for cat, items in result.by_category().items():
         by_app = {}
         for item in items:
-            by_app.setdefault(item.app_name, []).append(item)
+            group_key = item.app_name_key or item.app_name
+            by_app.setdefault(group_key, []).append(item)
 
         sub_groups = []
-        for app_name, app_items in by_app.items():
+        for group_key, app_items in by_app.items():
             app_size = sum(x.size_bytes for x in app_items)
             app_selected = sum(x.size_bytes for x in app_items if x.selected)
             all_safe = all(x.is_safe for x in app_items)
             any_selected = any(x.selected for x in app_items)
             all_selected = all(x.selected for x in app_items)
+            first_item = app_items[0]
+            app_name = (
+                t(first_item.app_name_key, **first_item.app_name_args)
+                if first_item.app_name_key else first_item.app_name
+            )
+            description = (
+                t(first_item.description_key, **first_item.description_args)
+                if first_item.description_key else first_item.description
+            )
             files = [{
                 "path": str(x.path),
                 "path_short": x.path_str,
@@ -60,10 +75,11 @@ def _serialize_scan_result(result: ScanResult | None):
                 "selected": x.selected,
                 "is_safe": x.is_safe,
                 "can_analyze": x.category == "large_file",
+                "description": t(x.description_key, **x.description_args) if x.description_key else x.description,
             } for x in app_items]
             sub_groups.append({
                 "app_name": app_name,
-                "description": app_items[0].description,
+                "description": description,
                 "size": app_size,
                 "size_display": format_size(app_size),
                 "selected_size": app_selected,
@@ -81,7 +97,7 @@ def _serialize_scan_result(result: ScanResult | None):
         cat_size = sum(i.size_bytes for i in items)
         cat_selected = sum(i.size_bytes for i in items if i.selected)
         data[cat] = {
-            "name": CATEGORY_NAMES.get(cat, cat),
+            "name": get_category_names().get(cat, cat),
             "size": cat_size,
             "size_display": format_size(cat_size),
             "selected_size": cat_selected,
@@ -114,7 +130,7 @@ def do_scan(categories=None):
     scan_options = {"categories": categories}
     scan_progress["status"] = "scanning"
     scan_progress["percent"] = 0
-    scan_progress["label"] = "初始化..."
+    scan_progress["label"] = t("ui.init")
     scan_progress["logs"] = []
     scan_queue = queue.Queue()
     scanner = Scanner()
@@ -124,7 +140,7 @@ def do_scan(categories=None):
         scan_result = result
         scan_progress["status"] = "done"
         scan_progress["percent"] = 100
-        scan_progress["label"] = "扫描完成！"
+        scan_progress["label"] = t("ui.scan_done")
 
     scanner.scan_all(scan_queue, categories=categories, done_callback=on_done)
 
@@ -164,7 +180,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/scan/result":
             self._json(_serialize_scan_result(scan_result))
         elif path == "/api/perm":
-            self._json({"fda": check_full_disk_access()})
+            self._json({"fda": check_full_disk_access(), "trash": check_trash_access()})
+        elif path == "/api/lang":
+            self._json({"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})})
         else:
             self.send_error(404)
 
@@ -180,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/clean":
             paths_to_clean = set(body.get("paths", []))
             if not scan_result or not paths_to_clean:
-                self._json({"error": "无选中项"})
+                self._json({"error": t("error.no_selection")})
                 return
             by_cat = {}
             for item in scan_result.items:
@@ -227,18 +245,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/reveal":
             target = body.get("path")
             if not target:
-                self._json({"ok": False, "error": "缺少路径"})
+                self._json({"ok": False, "error": t("error.missing_path")})
                 return
             self._json({"ok": reveal_in_finder(target)})
         elif path == "/api/analyze":
             target = body.get("path")
             if not target:
-                self._json({"error": "缺少路径"})
+                self._json({"error": t("error.missing_path")})
                 return
             self._json(analyze_path(target))
         elif path == "/api/perm/open":
             request_full_disk_access()
             self._json({"ok": True})
+        elif path == "/api/lang":
+            lang = body.get("lang", "zh")
+            set_lang(lang, save=True)
+            self._json({"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})})
         else:
             self.send_error(404)
 
@@ -265,7 +287,7 @@ def start_server(port=9527):
     server = HTTPServer(("127.0.0.1", port), Handler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
-    print(f"CleanMyCodeMac 后端已启动: http://127.0.0.1:{port}")
+    print(f"CleanMyCodeMac backend started: http://127.0.0.1:{port}")
 
     window = webview.create_window(
         "CleanMyCodeMac",
@@ -274,8 +296,9 @@ def start_server(port=9527):
         height=720,
         min_size=(800, 500),
     )
+
     webview.start()
-    print("已退出")
+    print("Exited")
     server.shutdown()
 
 
@@ -309,7 +332,11 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .perm-warn { color: #F59E0B; }
 .perm-action { margin-top: 8px; border: 1px solid #475569; background: transparent; color: #E2E8F0; border-radius: 8px; padding: 7px 10px; font-size: 11px; cursor: pointer; }
 .perm-action:hover { background: rgba(255,255,255,0.06); }
-.version { margin-top: auto; font-size: 10px; color: #475569; text-align: center; line-height: 1.7; }
+.lang-switch { margin-top: auto; margin-bottom: 8px; display: flex; gap: 4px; }
+.lang-btn { flex: 1; padding: 5px 0; border: 1px solid #475569; background: transparent; color: #94A3B8; border-radius: 6px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
+.lang-btn:hover { background: rgba(255,255,255,0.06); }
+.lang-btn.active { background: rgba(255,255,255,0.12); color: #F1F5F9; border-color: #64748B; }
+.version { font-size: 10px; color: #475569; text-align: center; line-height: 1.7; }
 .version .about-label { color: #94A3B8; display: block; margin-bottom: 4px; }
 
 .hero { background: linear-gradient(135deg, #1E293B 0%, #334155 100%); padding: 56px 32px; text-align: center; }
@@ -467,12 +494,18 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
       </svg>
       <div class="gauge-text">
         <div class="gauge-pct" id="gauge-pct">--%</div>
-        <div class="gauge-label">已使用</div>
+        <div class="gauge-label" id="gauge-label"></div>
       </div>
     </div>
-    <div class="disk-info" id="disk-info">加载中...</div>
+    <div class="disk-info" id="disk-info"></div>
     <div class="perm-status" id="perm-status"></div>
-    <div class="version">v1.0.0</div>
+    <div class="lang-switch" id="lang-switch"></div>
+    <div class="version">
+      <span class="about-label" id="about-label"></span>
+      <div><span id="author-label"></span>: killy</div>
+      <div><span id="email-label"></span>: 3168582@qq.com</div>
+      <div><span id="version-label"></span>: v1.0.0</div>
+    </div>
   </div>
 
   <div class="main">
@@ -480,16 +513,16 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
     <div id="view-home">
       <div class="hero">
         <h1>CleanMyCodeMac</h1>
-        <p>扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间</p>
+        <p id="hero-desc"></p>
         <div class="hero-actions">
-          <button class="btn-scan" onclick="startScan()">开始扫描</button>
-          <button class="btn-ghost" onclick="selectAllScopes(true)">全选范围</button>
-          <button class="btn-ghost" onclick="selectAllScopes(false)">清空范围</button>
+          <button class="btn-scan" id="btn-start-scan" onclick="startScan()"></button>
+          <button class="btn-ghost" id="btn-select-all" onclick="selectAllScopes(true)"></button>
+          <button class="btn-ghost" id="btn-clear-all" onclick="selectAllScopes(false)"></button>
         </div>
       </div>
       <div class="scope-head">
-        <div class="cards-title">扫描范围</div>
-        <div class="scope-summary" id="scope-summary">已选择 6 / 6 项</div>
+        <div class="cards-title" id="scope-title"></div>
+        <div class="scope-summary" id="scope-summary"></div>
       </div>
       <div class="cards" id="scope-cards"></div>
     </div>
@@ -497,9 +530,9 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
     <div id="view-scan" class="hidden">
       <div class="scan-view">
         <div class="spinner"></div>
-        <div class="scan-title">正在扫描...</div>
-        <div class="scan-sub" id="scan-label">初始化中...</div>
-        <div class="scan-scope"><span class="scan-scope-label">范围</span><span class="scan-scope-value" id="scan-scope"></span></div>
+        <div class="scan-title" id="scan-title"></div>
+        <div class="scan-sub" id="scan-label"></div>
+        <div class="scan-scope"><span class="scan-scope-label" id="scan-scope-label"></span><span class="scan-scope-value" id="scan-scope"></span></div>
         <div class="progress-bar"><div class="progress-fill" id="scan-bar" style="width:0%"></div></div>
         <div class="scan-pct" id="scan-pct">0%</div>
         <div class="scan-log" id="scan-log"></div>
@@ -512,14 +545,14 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
           <svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="26" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/><text x="28" y="34" text-anchor="middle" font-size="24" fill="#F97316">!</text></svg>
         </div>
         <div class="result-info">
-          <h2>共发现可清理文件 <span id="result-total">--</span></h2>
-          <div class="sel">已选择垃圾 <strong id="result-selected">--</strong></div>
+          <h2><span id="result-found-label"></span> <span id="result-total">--</span></h2>
+          <div class="sel"><span id="result-selected-label"></span> <strong id="result-selected">--</strong></div>
         </div>
         <div class="result-actions">
-          <button class="btn-back" onclick="showView('home')">返回</button>
-          <button class="btn-lite" onclick="toggleAllResultSelection(true)">全选结果</button>
-          <button class="btn-lite" onclick="toggleAllResultSelection(false)">取消全选</button>
-          <button class="btn-clean" id="btn-clean" onclick="doClean()">立即清理</button>
+          <button class="btn-back" id="btn-back" onclick="showView('home')"></button>
+          <button class="btn-lite" id="btn-select-result" onclick="toggleAllResultSelection(true)"></button>
+          <button class="btn-lite" id="btn-deselect-result" onclick="toggleAllResultSelection(false)"></button>
+          <button class="btn-clean" id="btn-clean" onclick="doClean()"></button>
         </div>
       </div>
       <div class="cat-list" id="cat-list"></div>
@@ -530,7 +563,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 <div id="analysis-mask" class="analysis-mask" onclick="closeAnalysis(event)">
   <div class="analysis-panel" onclick="event.stopPropagation()">
     <div class="analysis-head">
-      <h3 id="analysis-title">占用分析</h3>
+      <h3 id="analysis-title"></h3>
       <button class="analysis-close" onclick="closeAnalysis()">&times;</button>
     </div>
     <div class="analysis-body" id="analysis-body"></div>
@@ -539,7 +572,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 
 <div id="dialog-mask" class="dialog-mask" onclick="closeDialog(false)">
   <div class="dialog-panel" onclick="event.stopPropagation()">
-    <div class="dialog-head"><div class="dialog-title" id="dialog-title">提示</div></div>
+    <div class="dialog-head"><div class="dialog-title" id="dialog-title"></div></div>
     <div class="dialog-body" id="dialog-body"></div>
     <div class="dialog-actions" id="dialog-actions"></div>
   </div>
@@ -548,15 +581,106 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 <div id="toast-wrap" class="toast-wrap"></div>
 
 <script>
-const CAT_CFG = {
-  system_cache: { icon: '&#9881;', color: '#F97316', bg: '#FFF7ED', name: '系统垃圾', desc: 'macOS 系统应用产生的临时缓存' },
-  app_cache:    { icon: '&#9638;', color: '#3B82F6', bg: '#EFF6FF', name: '应用垃圾', desc: 'Chrome、VSCode 等 App 缓存' },
-  log:          { icon: '&#9776;', color: '#8B5CF6', bg: '#F5F3FF', name: '日志文件', desc: '7 天以上的崩溃报告与运行日志' },
-  download:     { icon: '&#8595;', color: '#10B981', bg: '#ECFDF5', name: '下载文件', desc: '下载文件夹旧文件分析' },
-  large_file:   { icon: '&#9650;', color: '#EF4444', bg: '#FEF2F2', name: '大文件', desc: '搜索 500MB 以上的大文件并分析占用' },
-  trash:        { icon: '&#9003;', color: '#6B7280', bg: '#F3F4F6', name: '废纸篓', desc: '立即清空废纸篓释放空间' },
+/* ── i18n ── */
+const UI = {
+  zh: {
+    used: '已使用', loading: '加载中...', heroDesc: '扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间',
+    startScan: '开始扫描', selectAll: '全选范围', clearAll: '清空范围',
+    scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
+    scanning: '正在扫描...', initializing: '初始化中...', scopeLabel: '范围',
+    foundFiles: '共发现可清理文件', selectedJunk: '已选择垃圾',
+    back: '返回', selectResult: '全选结果', deselectResult: '取消全选', cleanNow: '立即清理',
+    cleaning: '清理中...', cleanDone: '清理完成', cleanFreed: '清理完成，释放了 {size}',
+    cleanFailed: '{n} 个项目失败',
+    permOk: '&#10003; 完全磁盘访问已授权', permWarn: '&#9888; 未授权完全磁盘访问',
+    permTrashWarn: '废纸篓访问未授权', permPartialWarn: '部分受保护目录未授权',
+    permOpen: '打开授权设置',
+    diskFree: '可用',
+    badgeClean: '很干净', badgeSafe: '建议清理', badgeWarn: '谨慎清理',
+    expandFiles: '展开文件列表', open: '打开', analyze: '分析',
+    catTotal: '共 {size}，已选择', analysisTitle: '占用分析', analyzing: '正在分析，请稍候...',
+    analysisConclusion: '分析结论', sameLevelUsage: '同级目录占用', treeView: '树状占用视图',
+    upperDir: '上层目录：', dirType: '目录', fileType: '文件', percent: '占比',
+    finder: 'Finder', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
+    copyFail: '复制失败，请手动复制命令', copyFailTitle: '复制失败',
+    noAnalysis: '没有可展示的分析数据。', suggestedActions: '建议动作',
+    dockerNoResult: '未获取到 Docker CLI 结果，可能是 Docker 未启动或命令不可用。',
+    hint: '提示', gotIt: '知道了', confirm: '请确认', cancel: '取消', ok: '确认',
+    about: '关于', author: '作者', email: '邮箱', version: '版本', langZh: '中文', langEn: 'EN',
+    alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
+    alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
+    confirmClean: '即将清理 {n} 个项目。\n文件将移入废纸篓（可恢复），确认继续？', confirmCleanTitle: '确认清理',
+    confirmCleanTrash: '即将永久删除 {n} 个废纸篓项目。\n删除后不可恢复，确认继续？', confirmCleanTrashTitle: '确认永久删除',
+    catName: {
+      system_cache: '系统垃圾', app_cache: '应用垃圾', log: '日志文件',
+      download: '下载文件', large_file: '大文件', trash: '废纸篓',
+      dev_cache: '编程缓存', document: '文档文件', media: '媒体文件',
+    },
+    catDesc: {
+      system_cache: 'macOS 系统应用产生的临时缓存', app_cache: 'Chrome、VSCode 等 App 缓存',
+      log: '7 天以上的崩溃报告与运行日志', download: '下载文件夹旧文件分析',
+      large_file: '搜索 500MB 以上的大文件并分析占用', trash: '立即清空废纸篓释放空间',
+      dev_cache: 'Node、Rust、Java 等语言缓存与 IDE 缓存', document: '扫描主目录下文档文件，跳过 Library 和 Applications', media: '扫描主目录下图片、音频、视频，跳过 Library 和 Applications',
+    },
+  },
+  en: {
+    used: 'Used', loading: 'Loading...', heroDesc: 'Scan and clean junk files on your Mac to free up disk space',
+    startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear All',
+    scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
+    scanning: 'Scanning...', initializing: 'Initializing...', scopeLabel: 'Scope',
+    foundFiles: 'Cleanable files found', selectedJunk: 'Selected',
+    back: 'Back', selectResult: 'Select All', deselectResult: 'Deselect All', cleanNow: 'Clean Now',
+    cleaning: 'Cleaning...', cleanDone: 'Clean Complete', cleanFreed: 'Cleaned, freed {size}',
+    cleanFailed: '{n} items failed',
+    permOk: '&#10003; Full Disk Access granted', permWarn: '&#9888; Full Disk Access not granted',
+    permTrashWarn: 'Trash access not granted', permPartialWarn: 'Protected folders partially not granted',
+    permOpen: 'Open Settings',
+    diskFree: 'free',
+    badgeClean: 'Clean', badgeSafe: 'Safe to clean', badgeWarn: 'Use caution',
+    expandFiles: 'Expand file list', open: 'Open', analyze: 'Analyze',
+    catTotal: 'Total {size}, selected', analysisTitle: 'Usage Analysis', analyzing: 'Analyzing, please wait...',
+    analysisConclusion: 'Analysis', sameLevelUsage: 'Same-level Usage', treeView: 'Tree View',
+    upperDir: 'Parent dir: ', dirType: 'Directory', fileType: 'File', percent: 'Ratio',
+    finder: 'Finder', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
+    copyFail: 'Copy failed, please copy manually', copyFailTitle: 'Copy Failed',
+    noAnalysis: 'No analysis data available.', suggestedActions: 'Suggested Actions',
+    dockerNoResult: 'Docker CLI result not available. Docker may not be running.',
+    hint: 'Notice', gotIt: 'OK', confirm: 'Confirm', cancel: 'Cancel', ok: 'Confirm',
+    about: 'About', author: 'Author', email: 'Email', version: 'Version', langZh: '中文', langEn: 'EN',
+    alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
+    alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
+    confirmClean: 'About to clean {n} items.\nFiles will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
+    confirmCleanTrash: 'About to permanently delete {n} trash items.\nThis action cannot be undone. Continue?', confirmCleanTrashTitle: 'Confirm Permanent Delete',
+    catName: {
+      system_cache: 'System Junk', app_cache: 'App Junk', log: 'Log Files',
+      download: 'Downloads', large_file: 'Large Files', trash: 'Trash',
+      dev_cache: 'Dev Cache', document: 'Documents', media: 'Media',
+    },
+    catDesc: {
+      system_cache: 'Temporary cache from macOS system apps', app_cache: 'Cache from Chrome, VSCode, etc.',
+      log: 'Crash reports and logs older than 7 days', download: 'Old files in Downloads folder',
+      large_file: 'Search for files larger than 500MB', trash: 'Empty Trash to free space',
+      dev_cache: 'Node, Rust, Java language & IDE caches', document: 'Scan document files under Home, excluding Library and Applications', media: 'Scan images, audio and video under Home, excluding Library and Applications',
+    },
+  },
 };
-const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'download', 'large_file', 'trash'];
+let currentLang = 'zh';
+function T(key) { return (UI[currentLang] || UI.en)[key] || key; }
+function catName(cat) { const d = (UI[currentLang] || UI.en).catName; return d[cat] || cat; }
+function catDesc(cat) { const d = (UI[currentLang] || UI.en).catDesc; return d[cat] || ''; }
+
+const CAT_CFG = {
+  system_cache: { icon: '&#9881;', color: '#F97316', bg: '#FFF7ED' },
+  app_cache:    { icon: '&#9638;', color: '#3B82F6', bg: '#EFF6FF' },
+  log:          { icon: '&#9776;', color: '#8B5CF6', bg: '#F5F3FF' },
+  download:     { icon: '&#8595;', color: '#10B981', bg: '#ECFDF5' },
+  large_file:   { icon: '&#9650;', color: '#EF4444', bg: '#FEF2F2' },
+  trash:        { icon: '&#9003;', color: '#6B7280', bg: '#F3F4F6' },
+  dev_cache:    { icon: '&#128187;', color: '#0EA5E9', bg: '#F0F9FF' },
+  document:     { icon: '&#128196;', color: '#D97706', bg: '#FFFBEB' },
+  media:        { icon: '&#127912;', color: '#EC4899', bg: '#FDF2F8' },
+};
+const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'dev_cache', 'download', 'document', 'media', 'large_file', 'trash'];
 
 let resultData = null;
 let scanSelections = {};
@@ -584,8 +708,8 @@ function renderScopeCards() {
     card.innerHTML =
       '<input type="checkbox"' + (scanSelections[cat] ? ' checked' : '') + '>' +
       '<span class="card-icon" style="color:' + cfg.color + ';background:' + cfg.bg + '">' + cfg.icon + '</span>' +
-      '<h3>' + cfg.name + '</h3>' +
-      '<p>' + cfg.desc + '</p>';
+      '<h3>' + catName(cat) + '</h3>' +
+      '<p>' + catDesc(cat) + '</p>';
     card.onclick = () => {
       scanSelections[cat] = !scanSelections[cat];
       renderScopeCards();
@@ -597,7 +721,7 @@ function renderScopeCards() {
 
 function updateScopeSummary() {
   const selected = getSelectedScanCategories();
-  document.getElementById('scope-summary').textContent = '已选择 ' + selected.length + ' / ' + CAT_ORDER.length + ' 项';
+  document.getElementById('scope-summary').textContent = T('scopeSummary').replace('{n}', selected.length).replace('{t}', CAT_ORDER.length);
 }
 
 function selectAllScopes(state) {
@@ -619,15 +743,20 @@ async function loadDisk() {
   const usedG = (r.used / 1073741824).toFixed(1);
   const totalG = (r.total / 1073741824).toFixed(1);
   const freeG = (r.free / 1073741824).toFixed(1);
-  document.getElementById('disk-info').textContent = usedG + 'G / ' + totalG + 'G (可用 ' + freeG + 'G)';
+  document.getElementById('disk-info').textContent = usedG + 'G / ' + totalG + 'G (' + T('diskFree') + ' ' + freeG + 'G)';
 }
 
 async function loadPerm() {
   const r = await fetch('/api/perm').then(r => r.json());
   const el = document.getElementById('perm-status');
-  el.innerHTML = r.fda
-    ? '<span class="perm-ok">&#10003; 完全磁盘访问已授权</span>'
-    : '<span class="perm-warn">&#9888; 未授权完全磁盘访问</span><div><button class="perm-action" onclick="openPermissionSettings()">打开授权设置</button></div>';
+  if (r.fda && r.trash) {
+    el.innerHTML = '<span class="perm-ok">' + T('permOk') + '</span>';
+    return;
+  }
+  const warnText = !r.trash ? T('permTrashWarn') : T('permPartialWarn');
+  el.innerHTML =
+    '<span class="perm-warn">&#9888; ' + warnText + '</span>' +
+    '<div><button class="perm-action" onclick="openPermissionSettings()">' + T('permOpen') + '</button></div>';
 }
 
 async function openPermissionSettings() {
@@ -645,15 +774,17 @@ async function postJson(url, body) {
 async function startScan() {
   const categories = getSelectedScanCategories();
   if (categories.length === 0) {
-    await showAlert('请至少勾选一个扫描范围', '扫描范围为空');
+    await showAlert(T('alertNoScope'), T('alertNoScopeTitle'));
     return;
   }
   showView('scan');
+  document.getElementById('scan-title').textContent = T('scanning');
   document.getElementById('scan-bar').style.width = '0%';
   document.getElementById('scan-pct').textContent = '0%';
-  document.getElementById('scan-label').textContent = '初始化中...';
+  document.getElementById('scan-label').textContent = T('initializing');
   document.getElementById('scan-log').textContent = '';
-  document.getElementById('scan-scope').textContent = categories.map(cat => CAT_CFG[cat].name).join('、');
+  document.getElementById('scan-scope-label').textContent = T('scopeLabel');
+  document.getElementById('scan-scope').textContent = categories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
   await postJson('/api/scan/start', { categories });
   pollProgress();
 }
@@ -671,9 +802,9 @@ async function pollProgress() {
 }
 
 function safetyBadge(is_safe, size) {
-  if (size === 0) return '<span class="badge-clean">很干净</span>';
-  if (is_safe) return '<span class="badge badge-safe">建议清理</span>';
-  return '<span class="badge badge-warn">谨慎清理</span>';
+  if (size === 0) return '<span class="badge-clean">' + T('badgeClean') + '</span>';
+  if (is_safe) return '<span class="badge badge-safe">' + T('badgeSafe') + '</span>';
+  return '<span class="badge badge-warn">' + T('badgeWarn') + '</span>';
 }
 
 async function loadResult() {
@@ -695,7 +826,7 @@ function renderResult() {
   for (const cat of CAT_ORDER) {
     const data = r.categories[cat];
     if (!data) continue;
-    const cfg = CAT_CFG[cat] || { icon: '?', color: '#999', bg: '#F5F5F5', name: cat };
+    const cfg = CAT_CFG[cat] || { icon: '?', color: '#999', bg: '#F5F5F5' };
 
     const group = document.createElement('div');
     group.className = 'cat-group';
@@ -706,8 +837,8 @@ function renderResult() {
     header.innerHTML =
       '<input type="checkbox" class="cat-check"' + (data.all_selected ? ' checked' : '') + '>' +
       '<div class="cat-icon" style="background:' + cfg.bg + ';color:' + cfg.color + '">' + cfg.icon + '</div>' +
-      '<span class="cat-name" style="color:' + cfg.color + '">' + cfg.name + '</span>' +
-      '<span class="cat-meta">&nbsp;&nbsp;共 ' + data.size_display + '，已选择 <span class="sel-size cat-sel-size">' + data.selected_display + '</span></span>' +
+      '<span class="cat-name" style="color:' + cfg.color + '">' + catName(cat) + '</span>' +
+      '<span class="cat-meta">&nbsp;&nbsp;' + T('catTotal').replace('{size}', data.size_display) + ' <span class="sel-size cat-sel-size">' + data.selected_display + '</span></span>' +
       '<span class="cat-right"><span class="cat-arrow open">&#9660;</span></span>';
 
     const body = document.createElement('div');
@@ -726,6 +857,43 @@ function renderResult() {
       await loadResult();
     });
 
+    if (cat === 'trash') {
+      for (const sg of data.sub_groups) {
+        for (const f of sg.files) {
+          const frow = document.createElement('div');
+          frow.className = 'file-row';
+          frow.innerHTML =
+            '<input type="checkbox" class="file-cb"' + (f.selected ? ' checked' : '') +
+            ' data-path="' + escapeHtml(f.path) + '">' +
+            '<div class="file-path-wrap">' +
+              '<div class="file-path" title="' + escapeHtml(f.path) + '">' + escapeHtml(f.path_short) + '</div>' +
+              '<div class="file-hint">' + escapeHtml(f.description || '') + '</div>' +
+            '</div>' +
+            '<span class="file-size">' + f.size_display + '</span>' +
+            '<span class="file-actions">' +
+              '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">' + T('open') + '</button>' +
+            '</span>';
+          const fcb = frow.querySelector('.file-cb');
+          fcb.addEventListener('change', async (e) => {
+            e.stopPropagation();
+            await postJson('/api/select', { path: f.path, selected: fcb.checked });
+            await loadResult();
+          });
+          frow.querySelectorAll('.btn-mini').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              await postJson('/api/reveal', { path: btn.dataset.path });
+            });
+          });
+          body.appendChild(frow);
+        }
+      }
+      group.appendChild(header);
+      group.appendChild(body);
+      list.appendChild(group);
+      continue;
+    }
+
     for (const sg of data.sub_groups) {
       const subRow = document.createElement('div');
       subRow.className = 'sub-item';
@@ -739,7 +907,7 @@ function renderResult() {
         '<span class="sub-right">' +
           '<span class="sub-size">' + sg.size_display + '</span>' +
           safetyBadge(sg.is_safe, sg.size) +
-          '<span class="sub-toggle" title="展开文件列表">&#9660;</span>' +
+          '<span class="sub-toggle" title="' + T('expandFiles') + '">&#9660;</span>' +
         '</span>';
 
       const cb = subRow.querySelector('.sub-cb');
@@ -765,8 +933,8 @@ function renderResult() {
           '</div>' +
           '<span class="file-size">' + f.size_display + '</span>' +
           '<span class="file-actions">' +
-            '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">打开</button>' +
-            (f.can_analyze ? '<button class="btn-mini" data-action="analyze" data-path="' + escapeHtml(f.path) + '">分析</button>' : '') +
+            '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">' + T('open') + '</button>' +
+            (f.can_analyze ? '<button class="btn-mini" data-action="analyze" data-path="' + escapeHtml(f.path) + '">' + T('analyze') + '</button>' : '') +
           '</span>';
         const fcb = frow.querySelector('.file-cb');
         fcb.addEventListener('change', async (e) => {
@@ -810,13 +978,17 @@ async function toggleAllResultSelection(state) {
 async function doClean() {
   // 从 resultData 收集所有服务端标记为 selected 的路径
   const paths = [];
+  let hasTrashItems = false;
   if (resultData) {
     for (const cat of CAT_ORDER) {
       const data = resultData.categories[cat];
       if (!data) continue;
       for (const sg of data.sub_groups) {
         for (const f of sg.files) {
-          if (f.selected && !paths.includes(f.path)) paths.push(f.path);
+          if (f.selected && !paths.includes(f.path)) {
+            paths.push(f.path);
+            if (cat === 'trash') hasTrashItems = true;
+          }
         }
       }
     }
@@ -824,18 +996,18 @@ async function doClean() {
   const uniquePaths = paths;
 
   if (uniquePaths.length === 0) {
-    await showAlert('请先勾选要清理的项目', '未选择项目');
+    await showAlert(T('alertNoItem'), T('alertNoItemTitle'));
     return;
   }
   const confirmed = await showConfirm(
-    '即将清理 ' + uniquePaths.length + ' 个项目。\n文件将移入废纸篓（可恢复），确认继续？',
-    '确认清理'
+    (hasTrashItems ? T('confirmCleanTrash') : T('confirmClean')).replace('{n}', uniquePaths.length),
+    hasTrashItems ? T('confirmCleanTrashTitle') : T('confirmCleanTitle')
   );
   if (!confirmed) return;
 
   const btn = document.getElementById('btn-clean');
   btn.disabled = true;
-  btn.textContent = '清理中...';
+  btn.textContent = T('cleaning');
 
   const r = await fetch('/api/clean', {
     method: 'POST',
@@ -843,11 +1015,12 @@ async function doClean() {
     body: JSON.stringify({paths: uniquePaths})
   }).then(r => r.json());
 
-  let msg = '清理完成，释放了 ' + r.freed;
-  if (r.errors > 0) msg += '\n\n' + r.errors + ' 个项目失败';
-  showToast(msg, '清理完成', 'success');
+  let msg = T('cleanFreed').replace('{size}', r.freed);
+  if (r.errors > 0) msg += '\n\n' + T('cleanFailed').replace('{n}', r.errors);
+  showToast(msg, T('cleanDone'), 'success');
   btn.disabled = false;
-  btn.textContent = '立即清理';
+  btn.textContent = T('cleanNow');
+  loadDisk();
   startScan();
 }
 
@@ -855,13 +1028,13 @@ async function openAnalysis(path) {
   const mask = document.getElementById('analysis-mask');
   const title = document.getElementById('analysis-title');
   const body = document.getElementById('analysis-body');
-  title.textContent = '占用分析';
-  body.innerHTML = '<div class="analysis-note">正在分析，请稍候...</div>';
+  title.textContent = T('analysisTitle');
+  body.innerHTML = '<div class="analysis-note">' + T('analyzing') + '</div>';
   mask.classList.add('show');
 
   const data = await postJson('/api/analyze', { path });
   if (data.error) {
-    title.textContent = '占用分析';
+    title.textContent = T('analysisTitle');
     body.innerHTML = '<div class="analysis-note">' + escapeHtml(data.error) + '</div>';
     return;
   }
@@ -871,24 +1044,24 @@ async function openAnalysis(path) {
   const sections = [];
   if (data.highlights) {
     sections.push(
-      '<div class="analysis-section"><h4>分析结论</h4>' +
+      '<div class="analysis-section"><h4>' + T('analysisConclusion') + '</h4>' +
       data.highlights.map(line => '<div class="analysis-note">' + escapeHtml(line) + '</div>').join('') +
       '</div>'
     );
   }
 
   if (data.same_level_items && data.same_level_items.length) {
-    sections.push(renderAnalysisList('同级目录占用', data.same_level_items));
+    sections.push(renderAnalysisList(T('sameLevelUsage'), data.same_level_items));
   }
 
   if (data.tree) {
-    sections.push(renderAnalysisTree('树状占用视图', data.tree));
+    sections.push(renderAnalysisTree(T('treeView'), data.tree));
   }
 
   if (data.ancestor_levels && data.ancestor_levels.length) {
     data.ancestor_levels.forEach(level => {
       if (level.children && level.children.length) {
-        sections.push(renderAnalysisList('上层目录：' + level.path, level.children));
+        sections.push(renderAnalysisList(T('upperDir') + level.path, level.children));
       }
     });
   }
@@ -899,18 +1072,18 @@ async function openAnalysis(path) {
       data.special.highlights.map(line => '<div class="analysis-note">' + escapeHtml(line) + '</div>').join('') +
       (data.special.docker_summary && data.special.docker_summary.length
         ? '<div class="analysis-chip-row">' + data.special.docker_summary.map(item =>
-            '<div class="analysis-chip">' + escapeHtml(item.label) + '：' + escapeHtml(item.value) + '</div>'
+            '<div class="analysis-chip">' + escapeHtml(item.label) + ': ' + escapeHtml(item.value) + '</div>'
           ).join('') + '</div>'
         : '') +
       (data.special.suggestions && data.special.suggestions.length
-        ? '<div class="analysis-section"><h4>建议动作</h4>' +
+        ? '<div class="analysis-section"><h4>' + T('suggestedActions') + '</h4>' +
           data.special.suggestions.map(item =>
             '<div class="analysis-cmd">' +
               '<div class="analysis-cmd-title">' + escapeHtml(item.label) + '</div>' +
               '<div class="analysis-cmd-desc">' + escapeHtml(item.description) + '</div>' +
               '<div class="analysis-cmd-code">' + escapeHtml(item.command) + '</div>' +
               '<div class="analysis-cmd-actions">' +
-                '<button class="btn-mini" data-copy="' + escapeHtml(item.command) + '">复制命令</button>' +
+                '<button class="btn-mini" data-copy="' + escapeHtml(item.command) + '">' + T('copyCmd') + '</button>' +
               '</div>' +
             '</div>'
           ).join('') +
@@ -918,12 +1091,12 @@ async function openAnalysis(path) {
         : '') +
       (data.special.docker_cli_available
         ? '<div class="analysis-pre">' + escapeHtml(data.special.docker_df_lines.join('\n')) + '</div>'
-        : '<div class="analysis-note">未获取到 Docker CLI 结果，可能是 Docker 未启动或命令不可用。</div>') +
+        : '<div class="analysis-note">' + T('dockerNoResult') + '</div>') +
       '</div>'
     );
   }
 
-  body.innerHTML = sections.join('') || '<div class="analysis-note">没有可展示的分析数据。</div>';
+  body.innerHTML = sections.join('') || '<div class="analysis-note">' + T('noAnalysis') + '</div>';
   bindTreeToggles();
   bindAnalysisActions();
 }
@@ -952,11 +1125,11 @@ function renderTreeNode(node, depth) {
       '<span class="tree-toggle"' + (hasChildren ? '' : ' style="visibility:hidden"') + '>' + (hasChildren ? '&#9660;' : '') + '</span>' +
       '<div class="tree-label">' +
         '<div class="tree-name" title="' + escapeHtml(node.path) + '">' + escapeHtml(node.name) + '</div>' +
-        '<div class="tree-meta">' + escapeHtml(node.kind === 'dir' ? '目录' : '文件') + ' · 占比 ' + escapeHtml(node.percent) + '</div>' +
+        '<div class="tree-meta">' + escapeHtml(node.kind === 'dir' ? T('dirType') : T('fileType')) + ' · ' + T('percent') + ' ' + escapeHtml(node.percent) + '</div>' +
       '</div>' +
       '<div class="tree-actions">' +
-        '<button class="btn-mini" data-reveal="' + escapeHtml(node.path) + '">Finder</button>' +
-        (node.can_drill ? '<button class="btn-mini" data-drill="' + escapeHtml(node.path) + '">深入分析</button>' : '') +
+        '<button class="btn-mini" data-reveal="' + escapeHtml(node.path) + '">' + T('finder') + '</button>' +
+        (node.can_drill ? '<button class="btn-mini" data-drill="' + escapeHtml(node.path) + '">' + T('drillDown') + '</button>' : '') +
       '</div>' +
       '<div class="tree-size">' + escapeHtml(node.size_display) + '</div>' +
     '</div>' +
@@ -996,35 +1169,37 @@ function bindAnalysisActions() {
     btn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(btn.dataset.copy);
-        btn.textContent = '已复制';
-        setTimeout(() => { btn.textContent = '复制命令'; }, 1200);
+        btn.textContent = T('copied');
+        setTimeout(() => { btn.textContent = T('copyCmd'); }, 1200);
       } catch (_) {
-        showAlert('复制失败，请手动复制命令', '复制失败');
+        showAlert(T('copyFail'), T('copyFailTitle'));
       }
     });
   });
 }
 
-function showAlert(message, title = '提示') {
+function showAlert(message, title) {
+  title = title || T('hint');
   return new Promise(resolve => {
     const mask = document.getElementById('dialog-mask');
     document.getElementById('dialog-title').textContent = title;
     document.getElementById('dialog-body').textContent = message;
     document.getElementById('dialog-actions').innerHTML =
-      '<button class="btn-dialog-primary" onclick="closeDialog(true)">知道了</button>';
+      '<button class="btn-dialog-primary" onclick="closeDialog(true)">' + T('gotIt') + '</button>';
     dialogResolver = resolve;
     mask.classList.add('show');
   });
 }
 
-function showConfirm(message, title = '请确认') {
+function showConfirm(message, title) {
+  title = title || T('confirm');
   return new Promise(resolve => {
     const mask = document.getElementById('dialog-mask');
     document.getElementById('dialog-title').textContent = title;
     document.getElementById('dialog-body').textContent = message;
     document.getElementById('dialog-actions').innerHTML =
-      '<button class="btn-dialog-secondary" onclick="closeDialog(false)">取消</button>' +
-      '<button class="btn-dialog-primary" onclick="closeDialog(true)">确认</button>';
+      '<button class="btn-dialog-secondary" onclick="closeDialog(false)">' + T('cancel') + '</button>' +
+      '<button class="btn-dialog-primary" onclick="closeDialog(true)">' + T('ok') + '</button>';
     dialogResolver = resolve;
     mask.classList.add('show');
   });
@@ -1040,7 +1215,9 @@ function closeDialog(result) {
   }
 }
 
-function showToast(message, title = '提示', type = 'success') {
+function showToast(message, title, type) {
+  title = title || T('hint');
+  type = type || 'success';
   const wrap = document.getElementById('toast-wrap');
   const toast = document.createElement('div');
   toast.className = 'toast toast-' + type;
@@ -1062,9 +1239,60 @@ function closeAnalysis(event) {
 
 function escapeHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-initScopes();
-loadDisk();
-loadPerm();
+function renderLangSwitch() {
+  const el = document.getElementById('lang-switch');
+  el.innerHTML =
+    '<button class="lang-btn' + (currentLang === 'zh' ? ' active' : '') + '" onclick="switchLang(\'zh\')">' + T('langZh') + '</button>' +
+    '<button class="lang-btn' + (currentLang === 'en' ? ' active' : '') + '" onclick="switchLang(\'en\')">' + T('langEn') + '</button>';
+}
+
+function applyLang() {
+  renderLangSwitch();
+  document.getElementById('gauge-label').textContent = T('used');
+  document.getElementById('disk-info').textContent = T('loading');
+  document.getElementById('hero-desc').textContent = T('heroDesc');
+  document.getElementById('btn-start-scan').textContent = T('startScan');
+  document.getElementById('btn-select-all').textContent = T('selectAll');
+  document.getElementById('btn-clear-all').textContent = T('clearAll');
+  document.getElementById('scope-title').textContent = T('scopeTitle');
+  document.getElementById('scan-title').textContent = T('scanning');
+  document.getElementById('scan-scope-label').textContent = T('scopeLabel');
+  document.getElementById('result-found-label').textContent = T('foundFiles');
+  document.getElementById('result-selected-label').textContent = T('selectedJunk');
+  document.getElementById('btn-back').textContent = T('back');
+  document.getElementById('btn-select-result').textContent = T('selectResult');
+  document.getElementById('btn-deselect-result').textContent = T('deselectResult');
+  document.getElementById('btn-clean').textContent = T('cleanNow');
+  document.getElementById('about-label').textContent = T('about');
+  document.getElementById('author-label').textContent = T('author');
+  document.getElementById('email-label').textContent = T('email');
+  document.getElementById('version-label').textContent = T('version');
+  renderScopeCards();
+  loadDisk();
+  loadPerm();
+  if (resultData) renderResult();
+}
+
+async function switchLang(lang) {
+  currentLang = lang;
+  await postJson('/api/lang', { lang: lang });
+  applyLang();
+  if (resultData) {
+    await loadResult();
+  }
+}
+
+async function initLang() {
+  const r = await fetch('/api/lang').then(r => r.json());
+  currentLang = r.lang || 'zh';
+}
+
+initLang().then(() => {
+  applyLang();
+  initScopes();
+  loadDisk();
+  loadPerm();
+});
 </script>
 </body>
 </html>

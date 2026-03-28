@@ -3,9 +3,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 from models.scan_result import ScanResult
+from utils.i18n import t
 from .cleaners import (
     SystemCacheCleaner, AppCacheCleaner, LogsCleaner,
-    DownloadsAnalyzer, LargeFileScanner, TrashCleaner
+    DownloadsAnalyzer, LargeFileScanner, TrashCleaner,
+    DevCacheCleaner, DocumentScanner, MediaScanner,
 )
 
 CLEANERS = [
@@ -15,17 +17,14 @@ CLEANERS = [
     DownloadsAnalyzer(),
     LargeFileScanner(),
     TrashCleaner(),
+    DevCacheCleaner(),
+    DocumentScanner(),
+    MediaScanner(),
 ]
 CLEANERS_BY_CATEGORY = {cleaner.CATEGORY: cleaner for cleaner in CLEANERS}
 
-CATEGORY_NAMES = {
-    "system_cache": "系统缓存",
-    "app_cache": "应用缓存",
-    "log": "日志文件",
-    "download": "下载文件",
-    "large_file": "大文件",
-    "trash": "废纸篓",
-}
+def get_category_names():
+    return {c.CATEGORY: c.DISPLAY_NAME for c in CLEANERS}
 
 
 class Scanner:
@@ -52,7 +51,7 @@ class Scanner:
             if total == 0:
                 progress_queue.put({
                     "type": "log",
-                    "msg": "未选择扫描范围，已跳过扫描。",
+                    "msg": t("scan.no_scope"),
                 })
                 progress_queue.put({"type": "done", "result": result})
                 if done_callback:
@@ -82,12 +81,12 @@ class Scanner:
                         progress_queue.put({
                             "type": "progress",
                             "value": int(completed / total * 100),
-                            "label": f"已完成：{cleaner.DISPLAY_NAME}",
+                            "label": t("scan.done", name=cleaner.DISPLAY_NAME),
                         })
                     except Exception as e:
                         progress_queue.put({
                             "type": "log",
-                            "msg": f"{cleaner.DISPLAY_NAME} 扫描出错：{e}",
+                            "msg": t("scan.error", name=cleaner.DISPLAY_NAME, error=str(e)),
                         })
 
             progress_queue.put({"type": "done", "result": result})

@@ -4,3 +4,6 @@ from .logs_cleaner import LogsCleaner
 from .downloads import DownloadsAnalyzer
 from .large_files import LargeFileScanner
 from .trash import TrashCleaner
+from .dev_cache import DevCacheCleaner
+from .documents import DocumentScanner
+from .media import MediaScanner
