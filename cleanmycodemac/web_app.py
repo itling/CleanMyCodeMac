@@ -703,7 +703,7 @@ const UI = {
       system_cache: 'macOS 系统应用产生的临时缓存', app_cache: 'Chrome、VSCode 等 App 缓存',
       log: '7 天以上的崩溃报告与运行日志', download: '下载文件夹旧文件分析',
       large_file: '搜索 500MB 以上的大文件并分析占用', trash: '立即清空废纸篓释放空间',
-      dev_cache: 'Node、Rust、Java 等语言缓存与 IDE 缓存', document: '扫描主目录下文档文件，跳过 Library 和 Applications', media: '扫描主目录下图片、音频、视频，跳过 Library 和 Applications',
+      dev_cache: 'Node、Rust、Java 等语言缓存与 IDE 缓存', document: '扫描主目录下的文档文件', media: '扫描主目录下的图片、音频、视频',
     },
   },
   en: {
@@ -745,7 +745,7 @@ const UI = {
       system_cache: 'Temporary cache from macOS system apps', app_cache: 'Cache from Chrome, VSCode, etc.',
       log: 'Crash reports and logs older than 7 days', download: 'Old files in Downloads folder',
       large_file: 'Search for files larger than 500MB', trash: 'Empty Trash to free space',
-      dev_cache: 'Node, Rust, Java language & IDE caches', document: 'Scan document files under Home, excluding Library and Applications', media: 'Scan images, audio and video under Home, excluding Library and Applications',
+      dev_cache: 'Node, Rust, Java language & IDE caches', document: 'Scan document files under Home', media: 'Scan images, audio and video under Home',
     },
   },
 };
