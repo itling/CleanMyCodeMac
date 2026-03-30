@@ -29,7 +29,7 @@ class LargeFileScanner(BaseCleaner):
         config = load_config()
         threshold_bytes = config.get("large_file_threshold_mb", 500) * 1024 * 1024
 
-        self._notify(progress_callback, t("scan.large_file", threshold=config['large_file_threshold_mb']))
+        self._notify(progress_callback, "scan.large_file", threshold=config['large_file_threshold_mb'])
 
         home = str(Path.home())
         file_paths = mdfind_large_files(

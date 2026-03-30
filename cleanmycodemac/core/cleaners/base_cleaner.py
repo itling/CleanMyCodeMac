@@ -54,6 +54,6 @@ class BaseCleaner(ABC):
                         report.add_failure(item.path, str(e))
         return report
 
-    def _notify(self, callback: Optional[Callable], msg: str):
+    def _notify(self, callback: Optional[Callable], key: str, **kwargs):
         if callback:
-            callback(msg)
+            callback({"key": key, "args": kwargs})

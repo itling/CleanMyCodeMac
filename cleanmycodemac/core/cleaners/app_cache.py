@@ -31,7 +31,7 @@ class AppCacheCleaner(BaseCleaner):
         if not cache_root.exists():
             return items
 
-        self._notify(progress_callback, t("scan.app_cache"))
+        self._notify(progress_callback, "scan.app_cache")
 
         for cache_dir in sorted(cache_root.iterdir()):
             if not cache_dir.is_dir():

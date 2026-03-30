@@ -285,7 +285,7 @@ class DevCacheCleaner(BaseCleaner):
         config = load_config()
         auto_select_safe = config.get("auto_select_safe_items", True)
 
-        self._notify(progress_callback, t("scan.dev_cache"))
+        self._notify(progress_callback, "scan.dev_cache")
 
         # 1) 编程语言缓存
         for lang_name, paths in LANG_CACHES.items():
@@ -429,7 +429,7 @@ class DevCacheCleaner(BaseCleaner):
 
         # 6) 大模型文件（Ollama / HuggingFace / LM Studio 等）
         seen_paths = {str(item.path) for item in items}
-        self._notify(progress_callback, t("scan.ai_models"))
+        self._notify(progress_callback, "scan.ai_models")
 
         # Ollama：按单个模型列出（读 manifests 目录结构）
         # 目录层级：manifests/<registry>/<namespace>/<model_name>/<tag>

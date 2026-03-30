@@ -65,7 +65,7 @@ class Scanner:
                         break
                     future = executor.submit(
                         cleaner.scan,
-                        lambda msg: progress_queue.put({"type": "log", "msg": msg})
+                        lambda d: progress_queue.put({"type": "log", "key": d["key"], "args": d.get("args", {})})
                     )
                     futures[future] = cleaner
 

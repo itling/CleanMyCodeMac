@@ -30,7 +30,7 @@ class LogsCleaner(BaseCleaner):
         cutoff = datetime.now() - timedelta(days=min_age_days)
         seen_paths = set()
 
-        self._notify(progress_callback, t("scan.log"))
+        self._notify(progress_callback, "scan.log")
 
         for log_dir in LOG_DIRS:
             if not log_dir.exists():

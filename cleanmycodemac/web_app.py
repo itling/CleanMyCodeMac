@@ -188,7 +188,7 @@ def do_scan(categories=None):
                     scan_progress["label_key"] = msg.get("label_key", "")
                     scan_progress["label_args"] = msg.get("label_args", {})
                 elif t == "log":
-                    scan_progress["logs"].append(msg["msg"])
+                    scan_progress["logs"].append({"key": msg.get("key", ""), "args": msg.get("args", {})})
                 elif t == "done":
                     pass  # done_callback 已处理
             except queue.Empty:
@@ -771,6 +771,7 @@ let resultData = null;
 let scanSelections = {};
 let currentScanCategories = [];
 let dialogResolver = null;
+let lastKnownLogs = [];
 const startupStartedAt = Date.now();
 
 function showView(name) {
@@ -870,6 +871,7 @@ async function startScan() {
   document.getElementById('scan-bar').style.width = '0%';
   document.getElementById('scan-pct').textContent = '0%';
   document.getElementById('scan-label').textContent = T('initializing');
+  lastKnownLogs = [];
   document.getElementById('scan-log').textContent = '';
   document.getElementById('scan-scope-label').textContent = T('scopeLabel');
   document.getElementById('scan-scope').textContent = currentScanCategories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
@@ -891,11 +893,23 @@ async function pollProgress() {
     labelText = tpl;
   }
   document.getElementById('scan-label').textContent = labelText;
-  const logEl = document.getElementById('scan-log');
-  logEl.textContent = r.logs.map(l => '\u25b8 ' + l).join('\n');
-  logEl.scrollTop = logEl.scrollHeight;
+  lastKnownLogs = r.logs || [];
+  renderScanLog();
+  document.getElementById('scan-log').scrollTop = document.getElementById('scan-log').scrollHeight;
   if (r.status === 'done') { setTimeout(loadResult, 400); }
   else { setTimeout(pollProgress, 200); }
+}
+
+function renderScanLog() {
+  const logScanKeys = T('scanKeys') || {};
+  const logEl = document.getElementById('scan-log');
+  if (!logEl) return;
+  logEl.textContent = lastKnownLogs.map(l => {
+    let text = l.key && logScanKeys[l.key] ? logScanKeys[l.key] : (l.key || '');
+    const args = l.args || {};
+    Object.keys(args).forEach(k => { text = text.replace('{' + k + '}', args[k]); });
+    return '\u25b8 ' + text;
+  }).join('\n');
 }
 
 function safetyBadge(is_safe, size) {
@@ -1383,7 +1397,7 @@ function applyLang() {
   }
   const scanViewVisible = !document.getElementById('view-scan').classList.contains('hidden');
   if (scanViewVisible) {
-    document.getElementById('scan-label').textContent = T('initializing');
+    renderScanLog();
   }
   document.getElementById('result-found-label').textContent = T('foundFiles');
   document.getElementById('result-selected-label').textContent = T('selectedJunk');

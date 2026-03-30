@@ -30,7 +30,7 @@ class TrashCleaner(BaseCleaner):
     def scan(self, progress_callback: Optional[Callable[[str], None]] = None) -> List[ScanItem]:
         items = []
         auto_select_safe = load_config().get("auto_select_safe_items", True)
-        self._notify(progress_callback, t("scan.trash"))
+        self._notify(progress_callback, "scan.trash")
 
         locations = [path for path in self._trash_locations() if path.exists()]
         if not locations:

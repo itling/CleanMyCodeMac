@@ -80,7 +80,7 @@ class MediaScanner(BaseCleaner):
         items = []
         valid_exts = _all_extensions()
 
-        self._notify(progress_callback, t("scan.media"))
+        self._notify(progress_callback, "scan.media")
         self._scan_dir(Path.home(), valid_exts, items)
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

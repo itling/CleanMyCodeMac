@@ -37,7 +37,7 @@ class SystemCacheCleaner(BaseCleaner):
         auto_select_safe = config.get("auto_select_safe_items", True)
         cache_root = Path.home() / "Library/Caches"
 
-        self._notify(progress_callback, t("scan.system_cache"))
+        self._notify(progress_callback, "scan.system_cache")
 
         if not cache_root.exists():
             return items

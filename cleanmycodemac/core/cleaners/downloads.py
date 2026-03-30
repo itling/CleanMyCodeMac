@@ -39,7 +39,7 @@ class DownloadsAnalyzer(BaseCleaner):
         downloads_dir = Path.home() / "Downloads"
         items = []
 
-        self._notify(progress_callback, t("scan.download"))
+        self._notify(progress_callback, "scan.download")
 
         if not downloads_dir.exists():
             return items
