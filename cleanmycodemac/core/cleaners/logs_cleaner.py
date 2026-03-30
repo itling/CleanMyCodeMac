@@ -35,11 +35,11 @@ class LogsCleaner(BaseCleaner):
         for log_dir in LOG_DIRS:
             if not log_dir.exists():
                 continue
-            self._scan_dir(log_dir, cutoff, items, seen_paths)
+            self._scan_dir(log_dir, cutoff, items, seen_paths, auto_select_safe)
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)
 
-    def _scan_dir(self, directory: Path, cutoff: datetime, items: list, seen: set):
+    def _scan_dir(self, directory: Path, cutoff: datetime, items: list, seen: set, auto_select_safe: bool = True):
         try:
             entries = list(directory.iterdir())
         except PermissionError:
@@ -51,7 +51,7 @@ class LogsCleaner(BaseCleaner):
             seen.add(str(entry))
 
             if entry.is_dir():
-                self._scan_dir(entry, cutoff, items, seen)
+                self._scan_dir(entry, cutoff, items, seen, auto_select_safe)
                 continue
 
             if entry.suffix.lower() not in LOG_EXTENSIONS:

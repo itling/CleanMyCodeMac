@@ -161,6 +161,8 @@ def do_scan(categories=None):
     scan_progress["status"] = "scanning"
     scan_progress["percent"] = 0
     scan_progress["label"] = t("ui.init")
+    scan_progress["label_key"] = "ui.init"
+    scan_progress["label_args"] = {}
     scan_progress["logs"] = []
     scan_queue = queue.Queue()
     scanner = Scanner()
@@ -183,6 +185,8 @@ def do_scan(categories=None):
                 if t == "progress":
                     scan_progress["percent"] = msg["value"]
                     scan_progress["label"] = msg.get("label", "")
+                    scan_progress["label_key"] = msg.get("label_key", "")
+                    scan_progress["label_args"] = msg.get("label_args", {})
                 elif t == "log":
                     scan_progress["logs"].append(msg["msg"])
                 elif t == "done":
@@ -404,7 +408,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .progress-bar { width: 400px; height: 6px; background: #E8E8E8; border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #F97316, #FB923C); border-radius: 3px; transition: width 0.3s; }
 .scan-pct { font-size: 12px; color: #999; margin-bottom: 16px; }
-.scan-log { width: 440px; max-height: 140px; overflow-y: auto; background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px; padding: 10px; font-size: 11px; font-family: "Menlo", monospace; color: #999; }
+.scan-log { width: 440px; max-height: 160px; overflow-y: auto; background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: "Menlo", monospace; color: #999; white-space: pre-wrap; line-height: 1.7; }
 
 .result-top { background: white; padding: 20px 24px; display: flex; align-items: center; border-bottom: 1px solid #E8E8E8; position: sticky; top: 0; z-index: 10; }
 .result-icon { width: 56px; height: 56px; margin-right: 16px; flex-shrink: 0; }
@@ -665,6 +669,8 @@ const UI = {
     startScan: '开始扫描', selectAll: '全选', clearAll: '清空',
     scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
     scanning: '正在扫描...', initializing: '初始化中...', scopeLabel: '范围',
+    scanDone: '已完成：{name}', scanError: '{name} 扫描出错',
+    scanKeys: {'ui.init':'初始化中...','scan.system_cache':'正在扫描系统缓存...','scan.app_cache':'正在扫描应用缓存...','scan.log':'正在扫描日志文件...','scan.download':'正在分析下载文件夹...','scan.large_file':'正在搜索大文件...','scan.trash':'正在检查废纸篓...','scan.dev_cache':'正在扫描编程工具与语言缓存...','scan.ai_models':'正在扫描大模型文件...','scan.document':'正在扫描文档文件...','scan.media':'正在扫描媒体文件...','scan.done':'已完成：{name}','scan.error':'{name} 扫描出错'},
     foundFiles: '共发现可清理文件', selectedJunk: '已选择垃圾',
     back: '返回', selectResult: '全选结果', deselectResult: '取消全选', cleanNow: '立即清理',
     cleaning: '清理中...', cleanDone: '清理完成', cleanFreed: '清理完成，释放了 {size}',
@@ -705,6 +711,8 @@ const UI = {
     startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear',
     scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
     scanning: 'Scanning...', initializing: 'Initializing...', scopeLabel: 'Scope',
+    scanDone: 'Done: {name}', scanError: '{name} scan error',
+    scanKeys: {'ui.init':'Initializing...','scan.system_cache':'Scanning system cache...','scan.app_cache':'Scanning app cache...','scan.log':'Scanning log files...','scan.download':'Analyzing downloads folder...','scan.large_file':'Searching large files...','scan.trash':'Checking trash...','scan.dev_cache':'Scanning dev tools & language caches...','scan.ai_models':'Scanning AI model files...','scan.document':'Scanning document files...','scan.media':'Scanning media files...','scan.done':'Done: {name}','scan.error':'{name} scan error'},
     foundFiles: 'Cleanable files found', selectedJunk: 'Selected',
     back: 'Back', selectResult: 'Select All', deselectResult: 'Deselect All', cleanNow: 'Clean Now',
     cleaning: 'Cleaning...', cleanDone: 'Clean Complete', cleanFreed: 'Cleaned, freed {size}',
@@ -761,6 +769,7 @@ const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'dev_cache', 'download', 
 
 let resultData = null;
 let scanSelections = {};
+let currentScanCategories = [];
 let dialogResolver = null;
 const startupStartedAt = Date.now();
 
@@ -855,6 +864,7 @@ async function startScan() {
     await showAlert(T('alertNoScope'), T('alertNoScopeTitle'));
     return;
   }
+  currentScanCategories = categories;
   showView('scan');
   document.getElementById('scan-title').textContent = T('scanning');
   document.getElementById('scan-bar').style.width = '0%';
@@ -862,7 +872,7 @@ async function startScan() {
   document.getElementById('scan-label').textContent = T('initializing');
   document.getElementById('scan-log').textContent = '';
   document.getElementById('scan-scope-label').textContent = T('scopeLabel');
-  document.getElementById('scan-scope').textContent = categories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
+  document.getElementById('scan-scope').textContent = currentScanCategories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
   await postJson('/api/scan/start', { categories });
   pollProgress();
 }
@@ -871,7 +881,16 @@ async function pollProgress() {
   const r = await fetch('/api/scan/progress').then(r => r.json());
   document.getElementById('scan-bar').style.width = r.percent + '%';
   document.getElementById('scan-pct').textContent = r.percent + '%';
-  document.getElementById('scan-label').textContent = r.label;
+  // 优先用前端自己的 i18n 翻译，切换语言后立即生效
+  const scanKeys = T('scanKeys') || {};
+  let labelText = r.label;
+  if (r.label_key && scanKeys[r.label_key]) {
+    let tpl = scanKeys[r.label_key];
+    const args = r.label_args || {};
+    Object.keys(args).forEach(k => { tpl = tpl.replace('{' + k + '}', args[k]); });
+    labelText = tpl;
+  }
+  document.getElementById('scan-label').textContent = labelText;
   const logEl = document.getElementById('scan-log');
   logEl.textContent = r.logs.map(l => '\u25b8 ' + l).join('\n');
   logEl.scrollTop = logEl.scrollHeight;
@@ -1359,6 +1378,13 @@ function applyLang() {
   document.getElementById('scope-title').textContent = T('scopeTitle');
   document.getElementById('scan-title').textContent = T('scanning');
   document.getElementById('scan-scope-label').textContent = T('scopeLabel');
+  if (currentScanCategories.length > 0) {
+    document.getElementById('scan-scope').textContent = currentScanCategories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
+  }
+  const scanViewVisible = !document.getElementById('view-scan').classList.contains('hidden');
+  if (scanViewVisible) {
+    document.getElementById('scan-label').textContent = T('initializing');
+  }
   document.getElementById('result-found-label').textContent = T('foundFiles');
   document.getElementById('result-selected-label').textContent = T('selectedJunk');
   document.getElementById('btn-back').textContent = T('back');

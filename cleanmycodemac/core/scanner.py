@@ -82,6 +82,8 @@ class Scanner:
                             "type": "progress",
                             "value": int(completed / total * 100),
                             "label": t("scan.done", name=cleaner.DISPLAY_NAME),
+                            "label_key": "scan.done",
+                            "label_args": {"name": cleaner.DISPLAY_NAME},
                         })
                     except Exception as e:
                         progress_queue.put({
