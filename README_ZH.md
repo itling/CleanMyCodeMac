@@ -17,6 +17,7 @@
 ## 特性
 
 - 本地原生窗口（pywebview + WKWebView），非浏览器打开
+- 数据和清理流程都在本机完成，不依赖云服务
 - 分层分组展示扫描结果，支持按分类/应用逐级展开
 - 安全标签提示（建议清理 / 谨慎清理）
 - 文件移入废纸篓，可恢复
@@ -25,7 +26,7 @@
 
 ## 截图
 
-（待补充）
+![CleanMyCodeMac 主界面](resources/screenshots/home-readme.png)
 
 ## 快速开始
 
@@ -60,14 +61,21 @@ python3 -m PyInstaller --noconfirm CleanMyCodeMac.spec
 # 产物在 dist/CleanMyCodeMac.app
 ```
 
-详细打包说明见 [BUILD.md](BUILD.md)。
+详细打包说明见 [BUILD_ZH.md](BUILD_ZH.md)。
+
+## 隐私与权限
+
+- 所有扫描和清理逻辑都在你的 Mac 本地执行。
+- 正常使用不依赖任何云服务。
+- 部分扫描目标需要“完全磁盘访问权限”后才能完整显示。
+- 清理操作会尽量将文件移入废纸篓，方便恢复。
 
 ## 项目结构
 
 ```
 cleanmycodemac/
 ├── main.py                 # 入口
-├── web_app.py              # HTTP 服务 + pywebview 窗口 + 前端页面
+├── web_app.py              # pywebview bridge + 内嵌前端页面
 ├── core/
 │   ├── scanner.py          # 扫描调度器（多线程并行）
 │   ├── analyzer.py         # 大文件深入分析（含 Docker）
@@ -106,4 +114,8 @@ cleanmycodemac/
 
 ## 许可证
 
-MIT
+[MIT](LICENSE)
+
+## 参与贡献
+
+贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -19,6 +19,7 @@ A macOS disk cleanup tool built for developers. Deeply cleans caches and redunda
 ## Highlights
 
 - Native macOS window (pywebview + WKWebView), not a browser
+- Local-first: scans and cleanup decisions run on your Mac
 - Grouped scan results with expand-by-category/app drill-down
 - Safety labels (Safe to clean / Use caution)
 - Files moved to Trash — recoverable
@@ -27,7 +28,7 @@ A macOS disk cleanup tool built for developers. Deeply cleans caches and redunda
 
 ## Screenshots
 
-(coming soon)
+![CleanMyCodeMac home screen](resources/screenshots/home-readme.png)
 
 ## Quick Start
 
@@ -64,12 +65,19 @@ python3 -m PyInstaller --noconfirm CleanMyCodeMac.spec
 
 See [BUILD.md](BUILD.md) for full build instructions.
 
+## Privacy & Permissions
+
+- All scan and cleanup logic runs locally on your Mac.
+- No cloud service is required for normal use.
+- Some scan targets may require Full Disk Access to be fully visible.
+- Cleanup operations move files to Trash when possible, so items remain recoverable.
+
 ## Project Structure
 
 ```
 cleanmycodemac/
 ├── main.py                 # Entry point
-├── web_app.py              # HTTP server + pywebview window + frontend
+├── web_app.py              # pywebview bridge + embedded frontend
 ├── core/
 │   ├── scanner.py          # Scan orchestrator (parallel threads)
 │   ├── analyzer.py         # Large file deep analysis (incl. Docker)
@@ -108,4 +116,8 @@ A config file is created at `~/.cleanmycodemac_config.json` on first run:
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, validation, and pull request guidance.
