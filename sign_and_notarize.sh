@@ -13,13 +13,13 @@ DEVELOPER_ID_APP="${DEVELOPER_ID_APP:-}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "缺少命令: $1"
+    echo "Missing command: $1"
     exit 1
   fi
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "该脚本仅支持在 macOS 上执行。"
+  echo "This script only runs on macOS."
   exit 1
 fi
 
@@ -27,13 +27,13 @@ require_cmd codesign
 require_cmd xcrun
 
 if [[ -z "$DEVELOPER_ID_APP" ]]; then
-  echo "请设置签名证书，例如："
+  echo "Please set the signing certificate, e.g.:"
   echo 'DEVELOPER_ID_APP="Developer ID Application: Your Name (TEAMID)" ./sign_and_notarize.sh'
   exit 1
 fi
 
 if [[ ! -d "$APP_PATH" ]]; then
-  echo "未找到应用包: $APP_PATH"
+  echo "App bundle not found: $APP_PATH"
   exit 1
 fi
 
@@ -45,8 +45,8 @@ if [[ -f "$DMG_PATH" ]]; then
 fi
 
 if [[ -z "$APPLE_ID" || -z "$TEAM_ID" || -z "$APP_PASSWORD" ]]; then
-  echo "签名已完成，未提供 notarization 参数，跳过公证。"
-  echo "如需公证，请设置 APPLE_ID、TEAM_ID、APP_PASSWORD 后重试。"
+  echo "Signing complete. Notarization skipped (APPLE_ID, TEAM_ID, APP_PASSWORD not set)."
+  echo "To notarize, set those variables and re-run."
   exit 0
 fi
 
@@ -67,5 +67,4 @@ else
   xcrun stapler staple "$APP_PATH"
 fi
 
-echo "签名与公证完成。"
-
+echo "Signing and notarization complete."

@@ -10,13 +10,13 @@ ICNS_PATH="$RESOURCES_DIR/app.icns"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "缺少命令: $1"
+    echo "Missing command: $1"
     exit 1
   fi
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "该脚本仅支持在 macOS 上执行。"
+  echo "This script only runs on macOS."
   exit 1
 fi
 
@@ -29,7 +29,7 @@ if [[ ! -f "$SOURCE_PNG" ]]; then
 fi
 
 if [[ ! -f "$SOURCE_PNG" ]]; then
-  echo "未找到源图标: $SOURCE_PNG"
+  echo "Source icon not found: $SOURCE_PNG"
   exit 1
 fi
 
@@ -46,4 +46,4 @@ cp "$SOURCE_PNG" "$GENERATED_DIR/icon_1024x1024.png"
 
 "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/scripts/build_icns.py" >/dev/null
 
-echo "图标已生成: $ICNS_PATH"
+echo "Icon generated: $ICNS_PATH"

@@ -12,7 +12,7 @@ BUILD_ROOT="$PROJECT_DIR/build"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "缺少命令: $1"
+    echo "Missing command: $1"
     exit 1
   fi
 }
@@ -40,10 +40,10 @@ build_one_arch() {
   local dmg_name="${APP_NAME}-${arch}.dmg"
   local dmg_path="$DIST_ROOT/$dmg_name"
 
-  echo "清理旧产物 ($arch)..."
+  echo "Cleaning previous build ($arch)..."
   rm -rf "$build_dir" "$dist_dir" "$dmg_path"
 
-  echo "构建 .app ($arch) ..."
+  echo "Building .app ($arch)..."
   PYINSTALLER_TARGET_ARCH="$arch" "$PYTHON_BIN" -m PyInstaller \
     --noconfirm \
     --clean \
@@ -52,7 +52,7 @@ build_one_arch() {
     "$PROJECT_DIR/CleanMyCodeMac.spec"
 
   if [[ ! -d "$app_bundle" ]]; then
-    echo "构建失败，未生成应用包: $app_bundle"
+    echo "Build failed, app bundle not found: $app_bundle"
     exit 1
   fi
 
@@ -60,7 +60,7 @@ build_one_arch() {
   cp -R "$app_bundle" "$dmg_staging_dir/"
   ln -sfn /Applications "$dmg_staging_dir/Applications"
 
-  echo "生成 .dmg ($arch) ..."
+  echo "Creating .dmg ($arch)..."
   hdiutil create \
     -volname "$APP_NAME $arch" \
     -srcfolder "$dmg_staging_dir" \
@@ -68,13 +68,13 @@ build_one_arch() {
     -format UDZO \
     "$dmg_path"
 
-  echo "构建完成 ($arch):"
+  echo "Build complete ($arch):"
   echo "APP: $app_bundle"
   echo "DMG: $dmg_path"
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "该脚本仅支持在 macOS 上执行。"
+  echo "This script only runs on macOS."
   exit 1
 fi
 
@@ -82,21 +82,21 @@ require_cmd hdiutil
 require_cmd python3
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
-  echo "未找到 Python 解释器: $PYTHON_BIN"
-  echo "可通过环境变量 PYTHON_BIN 指定，例如:"
+  echo "Python interpreter not found: $PYTHON_BIN"
+  echo "Override with PYTHON_BIN, e.g.:"
   echo "PYTHON_BIN=/path/to/python3 ./build_dmg.sh"
   exit 1
 fi
 
 if [[ ! -x "$PIP_BIN" ]]; then
-  echo "未找到 pip: $PIP_BIN"
-  echo "可通过环境变量 PIP_BIN 指定，例如:"
+  echo "pip not found: $PIP_BIN"
+  echo "Override with PIP_BIN, e.g.:"
   echo "PIP_BIN=/path/to/pip3 ./build_dmg.sh"
   exit 1
 fi
 
 if ! "$PYTHON_BIN" -c "import PyInstaller" >/dev/null 2>&1; then
-  echo "正在安装构建依赖..."
+  echo "Installing build dependencies..."
   "$PIP_BIN" install -r "$PROJECT_DIR/requirements-build.txt"
 fi
 
@@ -113,8 +113,8 @@ for arch_input in "${ARCH_INPUTS[@]}"; do
   fi
   normalized_arch="$(normalize_arch "$arch_input")"
   if [[ -z "$normalized_arch" ]]; then
-    echo "不支持的架构参数: $arch_input"
-    echo "可用值: x86_64, arm64, all"
+    echo "Unsupported architecture: $arch_input"
+    echo "Valid values: x86_64, arm64, all"
     exit 1
   fi
   ARCHS+=("$normalized_arch")
