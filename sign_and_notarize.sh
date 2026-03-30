@@ -3,8 +3,9 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_NAME="CleanMyCodeMac"
 APP_PATH="${APP_PATH:-$PROJECT_DIR/dist/CleanMyCodeMac.app}"
-DMG_PATH="${DMG_PATH:-$PROJECT_DIR/dist/CleanMyCodeMac.dmg}"
+DMG_PATH="${DMG_PATH:-}"
 
 APPLE_ID="${APPLE_ID:-}"
 TEAM_ID="${TEAM_ID:-}"
@@ -16,6 +17,38 @@ require_cmd() {
     echo "Missing command: $1"
     exit 1
   fi
+}
+
+resolve_default_dmg_path() {
+  local direct_path="$PROJECT_DIR/dist/${APP_NAME}.dmg"
+  local inferred_arch=""
+  local inferred_path=""
+  local matches=()
+
+  if [[ -f "$direct_path" ]]; then
+    echo "$direct_path"
+    return 0
+  fi
+
+  if [[ "$APP_PATH" == "$PROJECT_DIR"/dist/*/"$APP_NAME".app ]]; then
+    inferred_arch="${APP_PATH#"$PROJECT_DIR/dist/"}"
+    inferred_arch="${inferred_arch%%/*}"
+    inferred_path="$PROJECT_DIR/dist/${APP_NAME}-${inferred_arch}.dmg"
+    if [[ -f "$inferred_path" ]]; then
+      echo "$inferred_path"
+      return 0
+    fi
+  fi
+
+  shopt -s nullglob
+  matches=("$PROJECT_DIR"/dist/"$APP_NAME"-*.dmg)
+  shopt -u nullglob
+  if [[ ${#matches[@]} -gt 0 ]]; then
+    echo "${matches[0]}"
+    return 0
+  fi
+
+  echo "$direct_path"
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -35,6 +68,10 @@ fi
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App bundle not found: $APP_PATH"
   exit 1
+fi
+
+if [[ -z "$DMG_PATH" ]]; then
+  DMG_PATH="$(resolve_default_dmg_path)"
 fi
 
 codesign --force --deep --options runtime --sign "$DEVELOPER_ID_APP" "$APP_PATH"

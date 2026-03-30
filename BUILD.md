@@ -77,3 +77,23 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 ```
 
 If only `DEVELOPER_ID_APP` is provided, the script will sign and skip notarization.
+
+## GitHub Release Automation
+
+This repository can publish DMG files automatically through GitHub Actions.
+
+- Push a tag such as `v1.0.0`
+- The `release.yml` workflow builds DMG files for `arm64` and `x86_64`
+- If signing secrets are configured, the workflow signs and optionally notarizes the build
+- The generated DMG files are uploaded to the matching GitHub Release
+
+Recommended GitHub secrets:
+
+- `DEVELOPER_ID_APP`
+- `APPLE_CERTIFICATE_P12` (base64-encoded `.p12` certificate)
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `TEAM_ID`
+- `APP_PASSWORD`
+
+If those secrets are not configured, the workflow still publishes unsigned DMG files.

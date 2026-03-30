@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    name: Build DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x86_64
+          - runner: macos-14
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Make scripts executable
+        run: chmod +x build_dmg.sh sign_and_notarize.sh
+
+      - name: Build DMG
+        run: ./build_dmg.sh ${{ matrix.arch }}
+
+      - name: Import Developer ID certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.DEVELOPER_ID_APP != '' }}
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          cert = os.environ["APPLE_CERTIFICATE_P12"]
+          path = Path(os.environ["RUNNER_TEMP"]) / "developer-id.p12"
+          path.write_bytes(base64.b64decode(cert))
+          print(f"Wrote certificate to {path}")
+          PY
+
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_PATH"
+
+      - name: Sign and notarize
+        if: ${{ secrets.DEVELOPER_ID_APP != '' }}
+        env:
+          APP_PATH: ${{ github.workspace }}/dist/${{ matrix.arch }}/CleanMyCodeMac.app
+          DMG_PATH: ${{ github.workspace }}/dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+        run: ./sign_and_notarize.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-dmg
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download DMG artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          generate_release_notes: true

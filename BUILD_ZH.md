@@ -75,3 +75,23 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 ```
 
 如果只提供 `DEVELOPER_ID_APP`，脚本会完成签名并跳过 notarization。
+
+## GitHub Release 自动发布
+
+这个仓库可以通过 GitHub Actions 自动把 DMG 发布到 Release。
+
+- 推送 tag，例如 `v1.0.0`
+- `release.yml` 会分别构建 `arm64` 和 `x86_64` 的 DMG
+- 如果配置了签名相关 secrets，就会自动签名，并在配置完整时继续做 notarization
+- 最终生成的 DMG 会自动上传到对应的 GitHub Release
+
+建议在 GitHub 仓库里配置这些 secrets：
+
+- `DEVELOPER_ID_APP`
+- `APPLE_CERTIFICATE_P12`（base64 编码后的 `.p12` 证书）
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `TEAM_ID`
+- `APP_PASSWORD`
+
+如果这些 secrets 没有配置，workflow 仍然会发布未签名的 DMG。
