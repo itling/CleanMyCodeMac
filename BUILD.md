@@ -1,8 +1,8 @@
 # CleanMyCodeMac Build Guide
 
-[中文文档](BUILD_ZH.md)
-
 This project can be packaged as a `.app` on macOS using `PyInstaller`, then wrapped into a `.dmg` with `hdiutil`.
+
+[中文文档](BUILD_ZH.md)
 
 ## Prerequisites
 
