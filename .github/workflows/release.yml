@@ -35,7 +35,10 @@ jobs:
         run: chmod +x build_dmg.sh sign_and_notarize.sh
 
       - name: Build DMG
-        run: ./build_dmg.sh ${{ matrix.arch }}
+        run: |
+          PYTHON_BIN="$(command -v python3)" \
+          PIP_BIN="$(command -v pip3)" \
+          ./build_dmg.sh ${{ matrix.arch }}
 
       - name: Import Developer ID certificate
         env:
