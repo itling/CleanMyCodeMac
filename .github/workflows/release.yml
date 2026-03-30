@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -37,11 +38,16 @@ jobs:
         run: ./build_dmg.sh ${{ matrix.arch }}
 
       - name: Import Developer ID certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.DEVELOPER_ID_APP != '' }}
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
         run: |
+          if [[ -z "${APPLE_CERTIFICATE_P12:-}" || -z "${APPLE_CERTIFICATE_PASSWORD:-}" || -z "${DEVELOPER_ID_APP:-}" ]]; then
+            echo "Signing certificate secrets are not fully configured; skipping certificate import."
+            exit 0
+          fi
+
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
 
@@ -68,7 +74,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_PATH"
 
       - name: Sign and notarize
-        if: ${{ secrets.DEVELOPER_ID_APP != '' }}
         env:
           APP_PATH: ${{ github.workspace }}/dist/${{ matrix.arch }}/CleanMyCodeMac.app
           DMG_PATH: ${{ github.workspace }}/dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
@@ -76,7 +81,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
-        run: ./sign_and_notarize.sh
+        run: |
+          if [[ -z "${DEVELOPER_ID_APP:-}" ]]; then
+            echo "DEVELOPER_ID_APP is not configured; publishing unsigned DMG."
+            exit 0
+          fi
+
+          ./sign_and_notarize.sh
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
