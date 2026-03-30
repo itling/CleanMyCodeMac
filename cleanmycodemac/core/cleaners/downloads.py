@@ -60,6 +60,8 @@ class DownloadsAnalyzer(BaseCleaner):
             category_key = categorize_file(entry) if entry.is_file() else "desc.file_type.folder"
             is_old = mtime < cutoff
 
+            desc_key = "desc.old_download" if is_old else "desc.download"
+            desc_args = {"date": mtime.strftime('%Y-%m-%d')}
             items.append(ScanItem(
                 path=entry,
                 size_bytes=size,
@@ -69,7 +71,9 @@ class DownloadsAnalyzer(BaseCleaner):
                 is_safe=is_old,
                 selected=False,     # 下载文件默认不勾选，让用户决定
                 last_modified=mtime,
-                description=t("desc.old_download" if is_old else "desc.download", date=mtime.strftime('%Y-%m-%d')),
+                description=t(desc_key, **desc_args),
+                description_key=desc_key,
+                description_args=desc_args,
             ))
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

@@ -124,4 +124,6 @@ class MediaScanner(BaseCleaner):
                 selected=False,
                 last_modified=mtime,
                 description=t("desc.media", name=entry.name, date=mtime.strftime("%Y-%m-%d")),
+                description_key="desc.media",
+                description_args={"name": entry.name, "date": mtime.strftime("%Y-%m-%d")},
             ))

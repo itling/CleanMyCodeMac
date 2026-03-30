@@ -98,4 +98,6 @@ class DocumentScanner(BaseCleaner):
                 selected=False,
                 last_modified=mtime,
                 description=t("desc.document", name=entry.name, date=mtime.strftime("%Y-%m-%d")),
+                description_key="desc.document",
+                description_args={"name": entry.name, "date": mtime.strftime("%Y-%m-%d")},
             ))
