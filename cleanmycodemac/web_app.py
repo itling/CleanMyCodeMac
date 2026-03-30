@@ -408,7 +408,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .progress-bar { width: 400px; height: 6px; background: #E8E8E8; border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #F97316, #FB923C); border-radius: 3px; transition: width 0.3s; }
 .scan-pct { font-size: 12px; color: #999; margin-bottom: 16px; }
-.scan-log { width: 440px; max-height: 160px; overflow-y: auto; background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: "Menlo", monospace; color: #999; white-space: pre-wrap; line-height: 1.7; }
+.scan-log { width: 440px; background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: "Menlo", monospace; color: #999; white-space: pre-wrap; line-height: 1.8; overflow: hidden; }
 
 .result-top { background: white; padding: 20px 24px; display: flex; align-items: center; border-bottom: 1px solid #E8E8E8; position: sticky; top: 0; z-index: 10; }
 .result-icon { width: 56px; height: 56px; margin-right: 16px; flex-shrink: 0; }
