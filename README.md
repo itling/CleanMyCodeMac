@@ -1,11 +1,14 @@
 # CleanMyCodeMac
 
-macOS 垃圾清理工具，扫描并清理系统中的无用文件，快速释放磁盘空间。
+专为程序员打造的 macOS 磁盘清理工具，深度清理开发环境产生的缓存与冗余文件，快速释放磁盘空间。
 
 ## 功能
 
 - **系统缓存** — 清理 macOS 系统应用产生的临时缓存
 - **应用缓存** — 清理 Chrome、VSCode、JetBrains 等第三方 App 缓存
+- **编程缓存** — 清理 Node.js、Python、Ruby、Rust、Go、Java 等开发工具链产生的缓存
+- **文本文件** — 扫描 PDF、Word、Excel、Markdown、iWork 等文档文件
+- **媒体文件** — 扫描图片、音频、视频等媒体文件
 - **日志文件** — 清理 7 天以上的崩溃报告与运行日志
 - **下载文件** — 分析下载文件夹中的旧文件，按类型分组展示
 - **大文件扫描** — 搜索 500MB 以上的大文件，支持深入分析（含 Docker 空间分析）
@@ -78,7 +81,10 @@ cleanmycodemac/
 │       ├── logs_cleaner.py
 │       ├── downloads.py
 │       ├── large_files.py
-│       └── trash.py
+│       ├── trash.py
+│       ├── dev_cache.py
+│       ├── documents.py
+│       └── media.py
 ├── models/                 # 数据模型
 │   ├── scan_item.py
 │   ├── scan_result.py

@@ -24,11 +24,8 @@ class BaseCleaner(ABC):
                 continue
             if dry_run:
                 continue
-            success = move_to_trash(item.path)
-            if success:
-                report.add_success(item.path, item.size_bytes)
-            else:
-                # 降级：直接删除
+            if item.is_safe:
+                # 安全项目（缓存/日志/开发缓存）直接删除，立即释放磁盘空间
                 try:
                     if item.path.is_dir():
                         shutil.rmtree(item.path)
@@ -36,7 +33,25 @@ class BaseCleaner(ABC):
                         item.path.unlink()
                     report.add_success(item.path, item.size_bytes)
                 except Exception as e:
-                    report.add_failure(item.path, str(e))
+                    # 降级：移入废纸篓
+                    if move_to_trash(item.path):
+                        report.add_success(item.path, item.size_bytes)
+                    else:
+                        report.add_failure(item.path, str(e))
+            else:
+                # 非安全项目（文档/媒体/大文件）移入废纸篓，保留可恢复性
+                success = move_to_trash(item.path)
+                if success:
+                    report.add_success(item.path, item.size_bytes)
+                else:
+                    try:
+                        if item.path.is_dir():
+                            shutil.rmtree(item.path)
+                        else:
+                            item.path.unlink()
+                        report.add_success(item.path, item.size_bytes)
+                    except Exception as e:
+                        report.add_failure(item.path, str(e))
         return report
 
     def _notify(self, callback: Optional[Callable], msg: str):

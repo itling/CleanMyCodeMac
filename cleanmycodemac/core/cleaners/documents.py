@@ -24,6 +24,7 @@ SKIP_DIRS = {
     "Applications", "Library", ".Trash",
     "node_modules", ".git", "__pycache__",
     ".orbstack",
+    "Downloads",  # 由 DownloadsAnalyzer 负责扫描，避免重复计入
 }
 
 

@@ -123,7 +123,21 @@ def _serialize_scan_result(result: ScanResult | None):
             "sub_groups": sub_groups,
         }
 
-    total = sum(i.size_bytes for i in result.items)
+    # 计算去重后的总大小：
+    # 1. 相同路径只计一次（同一文件被多个扫描器发现）
+    # 2. 若某路径是已统计目录的子路径，则跳过（目录大小已包含其下文件，不重复叠加）
+    #    例：DevCacheCleaner 上报 DerivedData(50GB)，LargeFileScanner 又发现其内的 .a 文件(2GB)
+    items_by_depth = sorted(result.items, key=lambda i: str(i.path).count('/'))
+    counted: list[str] = []
+    total = 0
+    for i in items_by_depth:
+        p = str(i.path)
+        if p in counted:
+            continue
+        if any(p.startswith(parent + '/') for parent in counted):
+            continue
+        counted.append(p)
+        total += i.size_bytes
     selected = sum(i.size_bytes for i in result.items if i.selected)
     return {
         "categories": data,
@@ -672,7 +686,7 @@ const UI = {
     about: '关于', author: '作者', email: '邮箱', version: '版本', langZh: '中文', langEn: 'EN',
     alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
     alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
-    confirmClean: '即将清理 {n} 个项目。\n文件将移入废纸篓（可恢复），确认继续？', confirmCleanTitle: '确认清理',
+    confirmClean: '即将清理 {n} 个项目。\n缓存/日志等安全项目将直接删除并释放磁盘空间；文档/媒体等项目将移入废纸篓（可恢复）。确认继续？', confirmCleanTitle: '确认清理',
     confirmCleanTrash: '即将永久删除 {n} 个废纸篓项目。\n删除后不可恢复，确认继续？', confirmCleanTrashTitle: '确认永久删除',
     catName: {
       system_cache: '系统垃圾', app_cache: '应用垃圾', log: '日志文件',
@@ -712,7 +726,7 @@ const UI = {
     about: 'About', author: 'Author', email: 'Email', version: 'Version', langZh: '中文', langEn: 'EN',
     alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
     alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
-    confirmClean: 'About to clean {n} items.\nFiles will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
+    confirmClean: 'About to clean {n} items.\nSafe items (caches/logs) will be permanently deleted to free disk space. Documents/media will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
     confirmCleanTrash: 'About to permanently delete {n} trash items.\nThis action cannot be undone. Continue?', confirmCleanTrashTitle: 'Confirm Permanent Delete',
     catName: {
       system_cache: 'System Junk', app_cache: 'App Junk', log: 'Log Files',
@@ -876,7 +890,7 @@ async function loadResult(showResultView = true) {
   if (!resultData) return;
   renderResult();
   if (showResultView) showView('result');
-  loadDisk();
+  await loadDisk();
 }
 
 function renderResult() {
@@ -1084,7 +1098,8 @@ async function doClean() {
   showToast(msg, T('cleanDone'), 'success');
   btn.disabled = false;
   btn.textContent = T('cleanNow');
-  loadDisk();
+  await new Promise(resolve => setTimeout(resolve, 600));
+  await loadDisk();
   startScan();
 }
 

@@ -194,6 +194,18 @@ TOOL_CACHES = {
     ],
 }
 
+# ── 大模型文件 ──
+
+AI_MODEL_CACHES = {
+    "LM Studio":     ["~/.lmstudio/models",
+                      "~/Library/Application Support/LM Studio/models"],
+    "Jan":           ["~/Library/Application Support/Jan/models"],
+    "GPT4All":       ["~/Library/Application Support/nomic.ai/GPT4All"],
+    "Msty":          ["~/Library/Application Support/Msty/models"],
+    "AnythingLLM":   ["~/Library/Application Support/anythingllm-desktop/models"],
+    "PyTorch Hub":   ["~/.cache/torch/hub"],
+}
+
 # JetBrains 产品动态检测
 JETBRAINS_PRODUCTS = [
     "IntelliJIdea", "PyCharm", "WebStorm", "GoLand",
@@ -414,5 +426,127 @@ class DevCacheCleaner(BaseCleaner):
                 description_key="desc.dev_tool_cache",
                 description_args={"tool": tool_name, "path": cache_dir.name},
             ))
+
+        # 6) 大模型文件（Ollama / HuggingFace / LM Studio 等）
+        seen_paths = {str(item.path) for item in items}
+        self._notify(progress_callback, t("scan.ai_models"))
+
+        # Ollama：按单个模型列出（读 manifests 目录结构）
+        # 目录层级：manifests/<registry>/<namespace>/<model_name>/<tag>
+        ollama_manifests = Path.home() / ".ollama" / "models" / "manifests"
+        ollama_blobs = Path.home() / ".ollama" / "models" / "blobs"
+        if ollama_manifests.exists() and ollama_blobs.exists():
+            try:
+                import json as _json
+                for registry in ollama_manifests.iterdir():
+                    if not registry.is_dir():
+                        continue
+                    for namespace in registry.iterdir():
+                        if not namespace.is_dir():
+                            continue
+                        for model_name in namespace.iterdir():
+                            if not model_name.is_dir():
+                                continue
+                            for tag_file in model_name.iterdir():
+                                if not tag_file.is_file():
+                                    continue
+                                try:
+                                    manifest = _json.loads(tag_file.read_text())
+                                    blob_size = 0
+                                    for layer in manifest.get("layers", []) + [manifest.get("config", {})]:
+                                        digest = (layer or {}).get("digest", "")
+                                        if digest:
+                                            blob = ollama_blobs / digest.replace(":", "-")
+                                            if blob.exists():
+                                                blob_size += blob.stat().st_blocks * 512
+                                    if blob_size < 1024 * 1024 * 10:
+                                        continue
+                                    model_label = f"{model_name.name}:{tag_file.name}"
+                                    try:
+                                        mtime = datetime.fromtimestamp(tag_file.stat().st_mtime)
+                                    except OSError:
+                                        mtime = None
+                                    if str(tag_file) not in seen_paths:
+                                        seen_paths.add(str(tag_file))
+                                        items.append(ScanItem(
+                                            path=tag_file,
+                                            size_bytes=blob_size,
+                                            category=self.CATEGORY,
+                                            app_name="Ollama",
+                                            is_safe=False,
+                                            selected=False,
+                                            last_modified=mtime,
+                                            description=t("desc.ai_model", tool="Ollama", name=model_label),
+                                            description_key="desc.ai_model",
+                                            description_args={"tool": "Ollama", "name": model_label},
+                                        ))
+                                except Exception:
+                                    continue
+            except OSError:
+                pass
+
+        # HuggingFace：按 repo 列出
+        hf_hub = Path.home() / ".cache" / "huggingface" / "hub"
+        if hf_hub.exists():
+            try:
+                for repo_dir in hf_hub.iterdir():
+                    if not repo_dir.is_dir():
+                        continue
+                    size = get_dir_size(repo_dir)
+                    if size < 1024 * 1024 * 10:
+                        continue
+                    repo_str = str(repo_dir)
+                    if repo_str in seen_paths or any(repo_str.startswith(s + "/") for s in seen_paths):
+                        continue
+                    seen_paths.add(repo_str)
+                    display_name = repo_dir.name.replace("models--", "").replace("--", "/")
+                    try:
+                        mtime = datetime.fromtimestamp(repo_dir.stat().st_mtime)
+                    except OSError:
+                        mtime = None
+                    items.append(ScanItem(
+                        path=repo_dir,
+                        size_bytes=size,
+                        category=self.CATEGORY,
+                        app_name="Hugging Face",
+                        is_safe=False,
+                        selected=False,
+                        last_modified=mtime,
+                        description=t("desc.ai_model", tool="Hugging Face", name=display_name),
+                        description_key="desc.ai_model",
+                        description_args={"tool": "Hugging Face", "name": display_name},
+                    ))
+            except OSError:
+                pass
+
+        # 其他 AI 工具：整目录报告
+        for tool_name, paths in AI_MODEL_CACHES.items():
+            for pattern in paths:
+                for p in _expand(pattern):
+                    if not p.exists():
+                        continue
+                    size = get_dir_size(p)
+                    if size < 1024 * 1024 * 10:
+                        continue
+                    p_str = str(p)
+                    if p_str in seen_paths or any(p_str.startswith(s + "/") for s in seen_paths):
+                        continue
+                    seen_paths.add(p_str)
+                    try:
+                        mtime = datetime.fromtimestamp(p.stat().st_mtime)
+                    except OSError:
+                        mtime = None
+                    items.append(ScanItem(
+                        path=p,
+                        size_bytes=size,
+                        category=self.CATEGORY,
+                        app_name=tool_name,
+                        is_safe=False,
+                        selected=False,
+                        last_modified=mtime,
+                        description=t("desc.ai_model", tool=tool_name, name=p.name),
+                        description_key="desc.ai_model",
+                        description_args={"tool": tool_name, "name": p.name},
+                    ))
 
         return sorted(items, key=lambda x: x.size_bytes, reverse=True)

@@ -49,8 +49,10 @@ class LargeFileScanner(BaseCleaner):
                 continue
 
             try:
-                size = path.stat().st_size
-                mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                stat = path.stat()
+                # 使用实际占用块数而非逻辑大小，避免稀疏文件（如 Docker.raw）虚报
+                size = stat.st_blocks * 512
+                mtime = datetime.fromtimestamp(stat.st_mtime)
             except OSError:
                 continue
 

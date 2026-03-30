@@ -7,9 +7,40 @@ from utils.i18n import t
 
 
 MEDIA_TYPES = {
-    "media.image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".heic", ".svg", ".raw", ".cr2", ".nef"},
-    "media.audio": {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma"},
-    "media.video": {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v"},
+    "media.image": {
+        # 通用
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp", ".heic", ".heif", ".svg",
+        # 相机 RAW
+        ".raw", ".dng",          # Adobe DNG / 大疆 DJI RAW
+        ".cr2", ".cr3",          # Canon
+        ".nef", ".nrw",          # Nikon
+        ".arw", ".srf", ".sr2",  # Sony
+        ".raf",                  # Fujifilm
+        ".rw2",                  # Panasonic / Lumix
+        ".orf",                  # Olympus
+        ".pef", ".ptx",          # Pentax
+        ".3fr",                  # Hasselblad
+        ".rwl",                  # Leica
+        # 运动相机
+        ".insp",                 # Insta360 照片
+        ".gpr",                  # GoPro RAW
+    },
+    "media.audio": {
+        ".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma",
+        ".ape", ".aiff", ".aif", ".opus", ".amr",
+    },
+    "media.video": {
+        # 通用
+        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
+        ".3gp", ".3g2", ".ts", ".mts", ".m2ts",
+        # 运动相机 / 无人机
+        ".insv",                 # Insta360 视频
+        ".lrv",                  # Insta360 / GoPro 低码率预览
+        ".r3d",                  # RED 摄影机
+        ".braw",                 # Blackmagic RAW
+        ".mxf",                  # 专业广播格式
+        ".vob", ".mpg", ".mpeg", ".m2v",
+    },
 }
 
 MIN_SIZE = 1024 * 1024  # 1 MB
@@ -19,6 +50,7 @@ SKIP_DIRS = {
     "Applications", "Library", ".Trash",
     "node_modules", ".git", "__pycache__",
     ".orbstack",
+    "Downloads",  # 由 DownloadsAnalyzer 负责扫描，避免重复计入
 }
 
 
