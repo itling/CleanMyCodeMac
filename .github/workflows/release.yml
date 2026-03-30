@@ -32,7 +32,17 @@ jobs:
           python-version: "3.11"
 
       - name: Make scripts executable
-        run: chmod +x build_dmg.sh sign_and_notarize.sh
+        run: chmod +x build_dmg.sh build_icon.sh sign_and_notarize.sh
+
+      - name: Ensure app icon
+        run: |
+          if [[ -f "resources/app.icns" ]]; then
+            echo "Using committed app.icns from repository."
+            exit 0
+          fi
+
+          PYTHON_BIN="$(command -v python3)" \
+          ./build_icon.sh
 
       - name: Build DMG
         run: |

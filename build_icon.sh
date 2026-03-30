@@ -7,6 +7,8 @@ RESOURCES_DIR="$PROJECT_DIR/resources"
 SOURCE_PNG="${SOURCE_PNG:-$RESOURCES_DIR/app_icon.png}"
 GENERATED_DIR="$RESOURCES_DIR/generated_icons"
 ICNS_PATH="$RESOURCES_DIR/app.icns"
+VENV_DIR="${VENV_DIR:-$PROJECT_DIR/venv}"
+PYTHON_BIN="${PYTHON_BIN:-$VENV_DIR/bin/python3}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -22,10 +24,21 @@ fi
 
 require_cmd sips
 
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="$(command -v python3 || true)"
+fi
+
+if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
+  echo "Python interpreter not found: ${PYTHON_BIN:-<empty>}"
+  echo "Override with PYTHON_BIN, e.g.:"
+  echo "PYTHON_BIN=/path/to/python3 ./build_icon.sh"
+  exit 1
+fi
+
 mkdir -p "$GENERATED_DIR"
 
 if [[ ! -f "$SOURCE_PNG" ]]; then
-  "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/scripts/generate_app_icon.py" >/dev/null
+  "$PYTHON_BIN" "$PROJECT_DIR/scripts/generate_app_icon.py" >/dev/null
 fi
 
 if [[ ! -f "$SOURCE_PNG" ]]; then
@@ -44,6 +57,6 @@ sips -z 256 256   "$SOURCE_PNG" --out "$GENERATED_DIR/icon_256x256.png" >/dev/nu
 sips -z 512 512   "$SOURCE_PNG" --out "$GENERATED_DIR/icon_512x512.png" >/dev/null
 cp "$SOURCE_PNG" "$GENERATED_DIR/icon_1024x1024.png"
 
-"$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/scripts/build_icns.py" >/dev/null
+"$PYTHON_BIN" "$PROJECT_DIR/scripts/build_icns.py" >/dev/null
 
 echo "Icon generated: $ICNS_PATH"

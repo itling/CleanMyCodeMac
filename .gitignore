@@ -13,6 +13,7 @@ venv/
 # macOS
 .DS_Store
 *.icns
+!resources/app.icns
 
 # IDE
 .idea/
