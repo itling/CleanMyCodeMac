@@ -3,7 +3,7 @@ from typing import List, Callable, Optional
 from datetime import datetime, timedelta
 from .base_cleaner import BaseCleaner
 from models.scan_item import ScanItem
-from utils.subprocess_utils import get_file_size, get_dir_size
+from utils.subprocess_utils import get_file_size
 from utils.config import load_config
 from utils.i18n import t
 
@@ -47,9 +47,11 @@ class DownloadsAnalyzer(BaseCleaner):
         for entry in downloads_dir.iterdir():
             if entry.name.startswith("."):
                 continue
+            if entry.is_dir():
+                continue
 
             try:
-                size = get_file_size(entry) if entry.is_file() else get_dir_size(entry)
+                size = get_file_size(entry)
                 mtime = datetime.fromtimestamp(entry.stat().st_mtime)
             except OSError:
                 continue
@@ -57,7 +59,7 @@ class DownloadsAnalyzer(BaseCleaner):
             if size < 1024 * 100:  # 跳过 <100KB
                 continue
 
-            category_key = categorize_file(entry) if entry.is_file() else "desc.file_type.folder"
+            category_key = categorize_file(entry)
             is_old = mtime < cutoff
 
             desc_key = "desc.old_download" if is_old else "desc.download"

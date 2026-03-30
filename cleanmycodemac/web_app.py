@@ -1,11 +1,7 @@
-"""CleanMyCodeMac - 本地原生窗口 UI，基于 pywebview + 内置 http.server"""
+"""CleanMyCodeMac - 本地原生窗口 UI，基于 pywebview + 内嵌 HTML"""
 
-import json
 import threading
 import queue
-import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
 
 from core.scanner import Scanner, get_category_names
 from core.disk_info import get_disk_info
@@ -33,12 +29,181 @@ CLEANER_MAP = {
     "media":        MediaScanner(),
 }
 
+SCAN_PROGRESS_IDLE = {
+    "status": "idle",
+    "percent": 0,
+    "label": "",
+    "label_key": "",
+    "label_args": {},
+    "logs": [],
+}
+
 # 全局状态
 scan_result: ScanResult = None
-scan_progress = {"status": "idle", "percent": 0, "label": "", "logs": []}
+scan_progress = SCAN_PROGRESS_IDLE.copy()
 scan_queue = queue.Queue()
 scanner = None
 scan_options = {"categories": list(CLEANER_MAP.keys())}
+
+def _language_payload():
+    return {"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})}
+
+
+def _permissions_payload():
+    return {"fda": check_full_disk_access(), "trash": check_trash_access()}
+
+
+def _missing_path_payload():
+    return {"ok": False, "error": t("error.missing_path")}
+
+
+def _reset_scan_progress():
+    scan_progress.update({
+        **SCAN_PROGRESS_IDLE,
+        "status": "scanning",
+        "label": t("ui.init"),
+        "label_key": "ui.init",
+    })
+
+
+def _set_scan_done(result: ScanResult):
+    global scan_result
+    scan_result = result
+    scan_progress["status"] = "done"
+    scan_progress["percent"] = 100
+    scan_progress["label"] = t("ui.scan_done")
+
+
+def _deduped_size(items, selected_only: bool = False) -> int:
+    filtered_items = [item for item in items if item.selected] if selected_only else list(items)
+    items_by_depth = sorted(filtered_items, key=lambda i: str(i.path).count('/'))
+    counted: list[str] = []
+    total = 0
+
+    for item in items_by_depth:
+        path_str = str(item.path)
+        if path_str in counted:
+            continue
+        if any(path_str.startswith(parent + '/') for parent in counted):
+            continue
+        counted.append(path_str)
+        total += item.size_bytes
+
+    return total
+
+
+def _group_description(app_items):
+    first_item = app_items[0]
+    if len(app_items) == 1:
+        return (
+            t(first_item.description_key, **first_item.description_args)
+            if first_item.description_key else first_item.description
+        )
+
+    dates = sorted(
+        item.last_modified.strftime("%Y-%m-%d")
+        for item in app_items
+        if item.last_modified is not None
+    )
+    if not dates:
+        return t("desc.group_summary", count=len(app_items))
+    if dates[0] == dates[-1]:
+        return t("desc.group_summary_date", count=len(app_items), date=dates[0])
+    return t("desc.group_summary_range", count=len(app_items), start=dates[0], end=dates[-1])
+
+
+def _representative_item(items):
+    if not items:
+        return None
+
+    # Prefer the least destructive cleaning strategy when a path appears in multiple categories.
+    for item in items:
+        if not item.is_safe:
+            return item
+    return items[0]
+
+
+def _matching_items(category=None, app_name=None):
+    if not scan_result:
+        return []
+
+    matched = []
+    for item in scan_result.items:
+        if category is not None and item.category != category:
+            continue
+        display_name = (
+            t(item.app_name_key, **item.app_name_args)
+            if item.app_name_key else item.app_name
+        )
+        if app_name is not None and item.app_name != app_name and display_name != app_name:
+            continue
+        matched.append(item)
+    return matched
+
+
+def _set_selected_for_paths(path_strs, selected):
+    if not scan_result:
+        return _selected_size_payload()
+
+    target_paths = {path_str for path_str in (path_strs or []) if path_str is not None}
+    if not target_paths:
+        return _selected_size_payload()
+
+    for item in scan_result.items:
+        if str(item.path) in target_paths:
+            item.selected = selected
+
+    return _selected_size_payload()
+
+
+def _set_path_selected(path_str, selected):
+    return _set_selected_for_paths([path_str], selected)
+
+
+def _set_category_selected(category, app_name=None, selected=True):
+    matching_paths = {str(item.path) for item in _matching_items(category=category, app_name=app_name)}
+    return _set_selected_for_paths(matching_paths, selected)
+
+
+def _set_all_selected(selected=True):
+    if scan_result:
+        for item in scan_result.items:
+            item.selected = selected
+    return _selected_size_payload()
+
+
+def _clean_selected_paths(paths):
+    paths_to_clean = set(paths or [])
+    if not scan_result or not paths_to_clean:
+        return {"error": t("error.no_selection")}
+
+    items_by_path = {}
+    for item in scan_result.items:
+        if str(item.path) in paths_to_clean:
+            items_by_path.setdefault(str(item.path), []).append(item)
+
+    items_by_category = {}
+    for _, duplicate_items in items_by_path.items():
+        representative = _representative_item(duplicate_items)
+        if representative is None:
+            continue
+        items_by_category.setdefault(representative.category, []).append(representative)
+
+    freed = 0
+    errors = []
+    for category, items in items_by_category.items():
+        cleaner = CLEANER_MAP.get(category)
+        if not cleaner:
+            continue
+        report = cleaner.clean(items)
+        freed += report.cleaned_bytes
+        errors.extend(report.failed)
+
+    return {
+        "freed": format_size(freed),
+        "freed_bytes": freed,
+        "errors": len(errors),
+    }
 
 
 class AppBridge:
@@ -54,6 +219,56 @@ class AppBridge:
             self.window.show()
             self._shown = True
         return {"ok": True}
+
+    def get_disk(self):
+        return get_disk_info()
+
+    def get_scan_progress(self):
+        return scan_progress
+
+    def get_scan_result(self):
+        return _serialize_scan_result(scan_result)
+
+    def get_permissions(self):
+        return _permissions_payload()
+
+    def get_language(self):
+        return _language_payload()
+
+    def start_scan(self, categories=None):
+        categories = categories or list(CLEANER_MAP.keys())
+        do_scan(categories)
+        return {"ok": True, "categories": scan_options["categories"]}
+
+    def clean_paths(self, paths):
+        return _clean_selected_paths(paths)
+
+    def select_path(self, path_str, selected):
+        return _set_path_selected(path_str, selected)
+
+    def select_category(self, category, app_name=None, selected=True):
+        return _set_category_selected(category, app_name=app_name, selected=selected)
+
+    def select_all(self, selected=True):
+        return _set_all_selected(selected)
+
+    def reveal_path(self, target):
+        if not target:
+            return _missing_path_payload()
+        return {"ok": reveal_in_finder(target)}
+
+    def analyze_target(self, target):
+        if not target:
+            return {"error": t("error.missing_path")}
+        return analyze_path(target)
+
+    def open_permission_settings(self):
+        request_full_disk_access()
+        return {"ok": True}
+
+    def set_language(self, lang="zh"):
+        set_lang(lang, save=True)
+        return _language_payload()
 
 
 def _serialize_scan_result(result: ScanResult | None):
@@ -79,10 +294,7 @@ def _serialize_scan_result(result: ScanResult | None):
                 t(first_item.app_name_key, **first_item.app_name_args)
                 if first_item.app_name_key else first_item.app_name
             )
-            description = (
-                t(first_item.description_key, **first_item.description_args)
-                if first_item.description_key else first_item.description
-            )
+            description = _group_description(app_items)
             files = [{
                 "path": str(x.path),
                 "path_short": x.path_str,
@@ -123,22 +335,8 @@ def _serialize_scan_result(result: ScanResult | None):
             "sub_groups": sub_groups,
         }
 
-    # 计算去重后的总大小：
-    # 1. 相同路径只计一次（同一文件被多个扫描器发现）
-    # 2. 若某路径是已统计目录的子路径，则跳过（目录大小已包含其下文件，不重复叠加）
-    #    例：DevCacheCleaner 上报 DerivedData(50GB)，LargeFileScanner 又发现其内的 .a 文件(2GB)
-    items_by_depth = sorted(result.items, key=lambda i: str(i.path).count('/'))
-    counted: list[str] = []
-    total = 0
-    for i in items_by_depth:
-        p = str(i.path)
-        if p in counted:
-            continue
-        if any(p.startswith(parent + '/') for parent in counted):
-            continue
-        counted.append(p)
-        total += i.size_bytes
-    selected = sum(i.size_bytes for i in result.items if i.selected)
+    total = _deduped_size(result.items)
+    selected = _deduped_size(result.items, selected_only=True)
     return {
         "categories": data,
         "total_items": len(result.items),
@@ -150,7 +348,7 @@ def _serialize_scan_result(result: ScanResult | None):
 
 
 def _selected_size_payload():
-    selected_size = sum(i.size_bytes for i in scan_result.items if i.selected) if scan_result else 0
+    selected_size = _deduped_size(scan_result.items, selected_only=True) if scan_result else 0
     return {"selected_size": format_size(selected_size)}
 
 
@@ -158,21 +356,12 @@ def do_scan(categories=None):
     global scan_result, scanner, scan_queue, scan_options
     categories = [cat for cat in (categories or CLEANER_MAP.keys()) if cat in CLEANER_MAP]
     scan_options = {"categories": categories}
-    scan_progress["status"] = "scanning"
-    scan_progress["percent"] = 0
-    scan_progress["label"] = t("ui.init")
-    scan_progress["label_key"] = "ui.init"
-    scan_progress["label_args"] = {}
-    scan_progress["logs"] = []
+    _reset_scan_progress()
     scan_queue = queue.Queue()
     scanner = Scanner()
 
     def on_done(result):
-        global scan_result
-        scan_result = result
-        scan_progress["status"] = "done"
-        scan_progress["percent"] = 100
-        scan_progress["label"] = t("ui.scan_done")
+        _set_scan_done(result)
 
     scanner.scan_all(scan_queue, categories=categories, done_callback=on_done)
 
@@ -188,7 +377,10 @@ def do_scan(categories=None):
                     scan_progress["label_key"] = msg.get("label_key", "")
                     scan_progress["label_args"] = msg.get("label_args", {})
                 elif t == "log":
-                    scan_progress["logs"].append({"key": msg.get("key", ""), "args": msg.get("args", {})})
+                    scan_progress["logs"] = [{
+                        "key": msg.get("key", ""),
+                        "args": msg.get("args", {}),
+                    }]
                 elif t == "done":
                     pass  # done_callback 已处理
             except queue.Empty:
@@ -198,147 +390,23 @@ def do_scan(categories=None):
 
     threading.Thread(target=consume, daemon=True).start()
 
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass  # 静默日志
-
-    def do_GET(self):
-        path = urlparse(self.path).path
-        if path == "/":
-            self._html()
-        elif path == "/api/disk":
-            self._json(get_disk_info())
-        elif path == "/api/scan/progress":
-            self._json(scan_progress)
-        elif path == "/api/scan/result":
-            self._json(_serialize_scan_result(scan_result))
-        elif path == "/api/perm":
-            self._json({"fda": check_full_disk_access(), "trash": check_trash_access()})
-        elif path == "/api/lang":
-            self._json({"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})})
-        else:
-            self.send_error(404)
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
-
-        if path == "/api/scan/start":
-            categories = body.get("categories") or list(CLEANER_MAP.keys())
-            do_scan(categories)
-            self._json({"ok": True, "categories": scan_options["categories"]})
-        elif path == "/api/clean":
-            paths_to_clean = set(body.get("paths", []))
-            if not scan_result or not paths_to_clean:
-                self._json({"error": t("error.no_selection")})
-                return
-            by_cat = {}
-            for item in scan_result.items:
-                if str(item.path) in paths_to_clean:
-                    by_cat.setdefault(item.category, []).append(item)
-            freed, errors = 0, []
-            for cat, items in by_cat.items():
-                c = CLEANER_MAP.get(cat)
-                if c:
-                    r = c.clean(items)
-                    freed += r.cleaned_bytes
-                    errors.extend(r.failed)
-            self._json({
-                "freed": format_size(freed),
-                "freed_bytes": freed,
-                "errors": len(errors),
-            })
-        elif path == "/api/select":
-            # 更新选中状态
-            path_str = body.get("path")
-            selected = body.get("selected")
-            if scan_result and path_str is not None:
-                for item in scan_result.items:
-                    if str(item.path) == path_str:
-                        item.selected = selected
-                        break
-            self._json(_selected_size_payload())
-        elif path == "/api/select_category":
-            cat = body.get("category")
-            app_name = body.get("app_name")
-            state = body.get("selected", True)
-            if scan_result:
-                for item in scan_result.items:
-                    if item.category == cat:
-                        if app_name is None or item.app_name == app_name:
-                            item.selected = state
-            self._json(_selected_size_payload())
-        elif path == "/api/select_all":
-            state = body.get("selected", True)
-            if scan_result:
-                for item in scan_result.items:
-                    item.selected = state
-            self._json(_selected_size_payload())
-        elif path == "/api/reveal":
-            target = body.get("path")
-            if not target:
-                self._json({"ok": False, "error": t("error.missing_path")})
-                return
-            self._json({"ok": reveal_in_finder(target)})
-        elif path == "/api/analyze":
-            target = body.get("path")
-            if not target:
-                self._json({"error": t("error.missing_path")})
-                return
-            self._json(analyze_path(target))
-        elif path == "/api/perm/open":
-            request_full_disk_access()
-            self._json({"ok": True})
-        elif path == "/api/lang":
-            lang = body.get("lang", "zh")
-            set_lang(lang, save=True)
-            self._json({"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})})
-        else:
-            self.send_error(404)
-
-    def _json(self, data):
-        body = json.dumps(data, ensure_ascii=False).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", len(body))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _html(self):
-        body = HTML_PAGE.encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", len(body))
-        self.end_headers()
-        self.wfile.write(body)
-
-
 def start_server(port=9527):
     import webview
-
-    server = HTTPServer(("127.0.0.1", port), Handler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-    print(f"CleanMyCodeMac backend started: http://127.0.0.1:{port}")
 
     bridge = AppBridge()
     window = webview.create_window(
         "CleanMyCodeMac",
-        f"http://127.0.0.1:{port}",
+        html=HTML_PAGE,
         js_api=bridge,
         width=1120,
         height=720,
         min_size=(800, 500),
-        hidden=True,
         background_color="#0F172A",
     )
     bridge.bind_window(window)
 
     webview.start()
     print("Exited")
-    server.shutdown()
 
 
 # ──────────────────────────────────────────────
@@ -557,10 +625,10 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
     <div class="startup-orb">
       <div class="startup-glow"></div>
     </div>
-    <div class="startup-title">CleanMyCodeMac</div>
-    <div class="startup-subtitle">Inspecting local storage, preparing cleanup tools, and loading the desktop shell.</div>
+    <div class="startup-title" id="startup-title">CleanMyCodeMac</div>
+    <div class="startup-subtitle" id="startup-subtitle">Inspecting local storage, preparing cleanup tools, and loading the desktop shell.</div>
     <div class="startup-bar"><div class="startup-bar-fill"></div></div>
-    <div class="startup-caption">Starting Up</div>
+    <div class="startup-caption" id="startup-caption">Starting Up</div>
   </div>
 </div>
 <div class="app">
@@ -666,6 +734,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 const UI = {
   zh: {
     used: '已使用', loading: '加载中...', heroDesc: '扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间',
+    startupTitle: 'CleanMyCodeMac', startupSubtitle: '正在检查本地存储、准备清理工具并加载桌面界面。', startupCaption: '正在启动',
     startScan: '开始扫描', selectAll: '全选', clearAll: '清空',
     scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
     scanning: '正在扫描...', initializing: '初始化中...', scopeLabel: '范围',
@@ -708,6 +777,7 @@ const UI = {
   },
   en: {
     used: 'Used', loading: 'Loading...', heroDesc: 'Scan and clean junk files on your Mac to free up disk space',
+    startupTitle: 'CleanMyCodeMac', startupSubtitle: 'Inspecting local storage, preparing cleanup tools, and loading the desktop shell.', startupCaption: 'Starting Up',
     startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear',
     scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
     scanning: 'Scanning...', initializing: 'Initializing...', scopeLabel: 'Scope',
@@ -772,13 +842,92 @@ let scanSelections = {};
 let currentScanCategories = [];
 let dialogResolver = null;
 let lastKnownLogs = [];
+let expandedCategories = new Set(CAT_ORDER);
+let expandedSubGroups = new Set();
 const startupStartedAt = Date.now();
+let bridgeObjectPromise = null;
+
+function ensureBridgeObject() {
+  if (bridgeObjectPromise) return bridgeObjectPromise;
+  bridgeObjectPromise = new Promise((resolve) => {
+    const finish = () => {
+      if (window.pywebview && window.pywebview.api) {
+        resolve(window.pywebview.api);
+        return true;
+      }
+      return false;
+    };
+
+    const onReady = () => {
+      if (finish()) {
+        window.removeEventListener('pywebviewready', onReady);
+      }
+    };
+
+    window.addEventListener('pywebviewready', onReady);
+
+    const poll = () => {
+      if (!finish()) {
+        setTimeout(poll, 50);
+      }
+    };
+
+    poll();
+  });
+  return bridgeObjectPromise;
+}
+
+async function waitForBridgeMethod(method) {
+  const api = await ensureBridgeObject();
+  if (typeof api[method] === 'function') {
+    return api[method];
+  }
+
+  return new Promise((resolve) => {
+    const poll = () => {
+      const fn = window.pywebview && window.pywebview.api && window.pywebview.api[method];
+      if (typeof fn === 'function') {
+        resolve(fn);
+      } else {
+        setTimeout(poll, 50);
+      }
+    };
+    poll();
+  });
+}
+
+async function callBridge(method, ...args) {
+  const fn = await waitForBridgeMethod(method);
+  return fn(...args);
+}
+
+const bridgeApi = {
+  getDisk() { return callBridge('get_disk'); },
+  getPermissions() { return callBridge('get_permissions'); },
+  openPermissionSettings() { return callBridge('open_permission_settings'); },
+  startScan(categories) { return callBridge('start_scan', categories); },
+  getScanProgress() { return callBridge('get_scan_progress'); },
+  getScanResult() { return callBridge('get_scan_result'); },
+  selectCategory(category, appName, selected) { return callBridge('select_category', category, appName, selected); },
+  selectPath(path, selected) { return callBridge('select_path', path, selected); },
+  selectAll(selected) { return callBridge('select_all', selected); },
+  cleanPaths(paths) { return callBridge('clean_paths', paths); },
+  analyzeTarget(path) { return callBridge('analyze_target', path); },
+  revealPath(path) { return callBridge('reveal_path', path); },
+  getLanguage() { return callBridge('get_language'); },
+  setLanguage(lang) { return callBridge('set_language', lang); },
+  onBootstrapReady() { return callBridge('on_bootstrap_ready'); },
+};
 
 function showView(name) {
   document.querySelectorAll('.main > div').forEach(v => { v.classList.add('hidden'); v.style.display = 'none'; });
   const el = document.getElementById('view-' + name);
   el.classList.remove('hidden');
   el.style.display = name === 'result' ? 'flex' : '';
+}
+
+function getSubGroupKey(cat, sg) {
+  return cat + '::' + (sg.primary_path || sg.app_name || '');
 }
 
 function initScopes() {
@@ -822,7 +971,7 @@ function getSelectedScanCategories() {
 }
 
 async function loadDisk() {
-  const r = await fetch('/api/disk').then(r => r.json());
+  const r = await bridgeApi.getDisk();
   const pct = r.total > 0 ? (r.used / r.total * 100) : 0;
   document.getElementById('gauge-pct').textContent = Math.round(pct) + '%';
   const arc = document.getElementById('gauge-arc');
@@ -835,7 +984,7 @@ async function loadDisk() {
 }
 
 async function loadPerm() {
-  const r = await fetch('/api/perm').then(r => r.json());
+  const r = await bridgeApi.getPermissions();
   const el = document.getElementById('perm-status');
   if (r.fda && r.trash) {
     el.innerHTML = '<span class="perm-ok">' + T('permOk') + '</span>';
@@ -848,15 +997,15 @@ async function loadPerm() {
 }
 
 async function openPermissionSettings() {
-  await postJson('/api/perm/open', {});
+  await bridgeApi.openPermissionSettings();
 }
 
-async function postJson(url, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body || {}),
-  }).then(r => r.json());
+function nextPaint() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => {
+      setTimeout(resolve, 0);
+    });
+  });
 }
 
 async function startScan() {
@@ -875,12 +1024,16 @@ async function startScan() {
   document.getElementById('scan-log').textContent = '';
   document.getElementById('scan-scope-label').textContent = T('scopeLabel');
   document.getElementById('scan-scope').textContent = currentScanCategories.map(cat => catName(cat)).join(currentLang === 'zh' ? '、' : ', ');
-  await postJson('/api/scan/start', { categories });
+
+  // Give the browser a chance to paint the scan view before the bridge call starts work.
+  await nextPaint();
+
+  await bridgeApi.startScan(categories);
   pollProgress();
 }
 
 async function pollProgress() {
-  const r = await fetch('/api/scan/progress').then(r => r.json());
+  const r = await bridgeApi.getScanProgress();
   document.getElementById('scan-bar').style.width = r.percent + '%';
   document.getElementById('scan-pct').textContent = r.percent + '%';
   // 优先用前端自己的 i18n 翻译，切换语言后立即生效
@@ -919,7 +1072,7 @@ function safetyBadge(is_safe, size) {
 }
 
 async function loadResult(showResultView = true) {
-  resultData = await fetch('/api/scan/result').then(r => r.json());
+  resultData = await bridgeApi.getScanResult();
   if (!resultData) return;
   renderResult();
   if (showResultView) showView('result');
@@ -942,6 +1095,7 @@ function renderResult() {
     const group = document.createElement('div');
     group.className = 'cat-group';
     group.dataset.cat = cat;
+    const isCategoryExpanded = expandedCategories.has(cat);
 
     const header = document.createElement('div');
     header.className = 'cat-header';
@@ -950,21 +1104,24 @@ function renderResult() {
       '<div class="cat-icon" style="background:' + cfg.bg + ';color:' + cfg.color + '">' + cfg.icon + '</div>' +
       '<span class="cat-name" style="color:' + cfg.color + '">' + catName(cat) + '</span>' +
       '<span class="cat-meta">&nbsp;&nbsp;' + T('catTotal').replace('{size}', data.size_display) + ' <span class="sel-size cat-sel-size">' + data.selected_display + '</span></span>' +
-      '<span class="cat-right"><span class="cat-arrow open">&#9660;</span></span>';
+      '<span class="cat-right"><span class="cat-arrow' + (isCategoryExpanded ? ' open' : '') + '">&#9660;</span></span>';
 
     const body = document.createElement('div');
-    body.className = 'cat-body';
+    body.className = 'cat-body' + (isCategoryExpanded ? '' : ' hidden');
 
     header.onclick = () => {
       body.classList.toggle('hidden');
-      header.querySelector('.cat-arrow').classList.toggle('open');
+      const isExpanded = !body.classList.contains('hidden');
+      header.querySelector('.cat-arrow').classList.toggle('open', isExpanded);
+      if (isExpanded) expandedCategories.add(cat);
+      else expandedCategories.delete(cat);
     };
 
     const catCb = header.querySelector('.cat-check');
     catCb.indeterminate = data.any_selected && !data.all_selected;
     catCb.addEventListener('click', e => e.stopPropagation());
     catCb.addEventListener('change', async () => {
-      await postJson('/api/select_category', { category: cat, selected: catCb.checked });
+      await bridgeApi.selectCategory(cat, null, catCb.checked);
       await loadResult();
     });
 
@@ -987,13 +1144,13 @@ function renderResult() {
           const fcb = frow.querySelector('.file-cb');
           fcb.addEventListener('change', async (e) => {
             e.stopPropagation();
-            await postJson('/api/select', { path: f.path, selected: fcb.checked });
+            await bridgeApi.selectPath(f.path, fcb.checked);
             await loadResult();
           });
           frow.querySelectorAll('.btn-mini').forEach(btn => {
             btn.addEventListener('click', async (e) => {
               e.stopPropagation();
-              await postJson('/api/reveal', { path: btn.dataset.path });
+              await bridgeApi.revealPath(btn.dataset.path);
             });
           });
           body.appendChild(frow);
@@ -1006,6 +1163,8 @@ function renderResult() {
     }
 
     for (const sg of data.sub_groups) {
+      const subGroupKey = getSubGroupKey(cat, sg);
+      const isSubGroupExpanded = expandedSubGroups.has(subGroupKey);
       const subRow = document.createElement('div');
       subRow.className = 'sub-item';
       subRow.innerHTML =
@@ -1018,21 +1177,21 @@ function renderResult() {
         '<span class="sub-right">' +
           '<span class="sub-size">' + sg.size_display + '</span>' +
           safetyBadge(sg.is_safe, sg.size) +
-          '<span class="sub-toggle" title="' + T('expandFiles') + '">&#9660;</span>' +
+          '<span class="sub-toggle' + (isSubGroupExpanded ? ' open' : '') + '" title="' + T('expandFiles') + '">&#9660;</span>' +
         '</span>';
 
       const cb = subRow.querySelector('.sub-cb');
       if (cb.dataset.indeterminate === '1') cb.indeterminate = true;
       cb.addEventListener('change', async (e) => {
         e.stopPropagation();
-        await postJson('/api/select_category', { category: cat, app_name: sg.app_name, selected: cb.checked });
+        await bridgeApi.selectCategory(cat, sg.app_name, cb.checked);
         await loadResult();
       });
 
       body.appendChild(subRow);
 
       const filesDiv = document.createElement('div');
-      filesDiv.className = 'file-details hidden';
+      filesDiv.className = 'file-details' + (isSubGroupExpanded ? '' : ' hidden');
       for (const f of sg.files) {
         const frow = document.createElement('div');
         frow.className = 'file-row';
@@ -1050,7 +1209,7 @@ function renderResult() {
         const fcb = frow.querySelector('.file-cb');
         fcb.addEventListener('change', async (e) => {
           e.stopPropagation();
-          await postJson('/api/select', { path: f.path, selected: fcb.checked });
+          await bridgeApi.selectPath(f.path, fcb.checked);
           await loadResult();
         });
         frow.querySelectorAll('.btn-mini').forEach(btn => {
@@ -1058,7 +1217,7 @@ function renderResult() {
             e.stopPropagation();
             const targetPath = btn.dataset.path;
             if (btn.dataset.action === 'reveal') {
-              await postJson('/api/reveal', { path: targetPath });
+              await bridgeApi.revealPath(targetPath);
             } else if (btn.dataset.action === 'analyze') {
               await openAnalysis(targetPath);
             }
@@ -1070,7 +1229,10 @@ function renderResult() {
       toggle.addEventListener('click', (e) => {
         e.stopPropagation();
         filesDiv.classList.toggle('hidden');
-        toggle.classList.toggle('open');
+        const isExpanded = !filesDiv.classList.contains('hidden');
+        toggle.classList.toggle('open', isExpanded);
+        if (isExpanded) expandedSubGroups.add(subGroupKey);
+        else expandedSubGroups.delete(subGroupKey);
       });
       body.appendChild(filesDiv);
     }
@@ -1082,7 +1244,7 @@ function renderResult() {
 }
 
 async function toggleAllResultSelection(state) {
-  await postJson('/api/select_all', { selected: state });
+  await bridgeApi.selectAll(state);
   await loadResult();
 }
 
@@ -1120,11 +1282,7 @@ async function doClean() {
   btn.disabled = true;
   btn.textContent = T('cleaning');
 
-  const r = await fetch('/api/clean', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({paths: uniquePaths})
-  }).then(r => r.json());
+  const r = await bridgeApi.cleanPaths(uniquePaths);
 
   let msg = T('cleanFreed').replace('{size}', r.freed);
   if (r.errors > 0) msg += '\n\n' + T('cleanFailed').replace('{n}', r.errors);
@@ -1144,7 +1302,7 @@ async function openAnalysis(path) {
   body.innerHTML = '<div class="analysis-note">' + T('analyzing') + '</div>';
   mask.classList.add('show');
 
-  const data = await postJson('/api/analyze', { path });
+  const data = await bridgeApi.analyzeTarget(path);
   if (data.error) {
     title.textContent = T('analysisTitle');
     body.innerHTML = '<div class="analysis-note">' + escapeHtml(data.error) + '</div>';
@@ -1273,7 +1431,7 @@ function bindAnalysisActions() {
   document.querySelectorAll('[data-reveal]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await postJson('/api/reveal', { path: btn.dataset.reveal });
+      await bridgeApi.revealPath(btn.dataset.reveal);
     });
   });
 
@@ -1352,16 +1510,9 @@ function closeAnalysis(event) {
 function escapeHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 async function notifyBootstrapReady() {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 4000) {
-    try {
-      if (window.pywebview && window.pywebview.api && window.pywebview.api.on_bootstrap_ready) {
-        await window.pywebview.api.on_bootstrap_ready();
-        return;
-      }
-    } catch (_) {}
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  try {
+    await bridgeApi.onBootstrapReady();
+  } catch (_) {}
 }
 
 async function hideStartupScreen() {
@@ -1383,6 +1534,9 @@ function renderLangSwitch() {
 
 function applyLang() {
   renderLangSwitch();
+  document.getElementById('startup-title').textContent = T('startupTitle');
+  document.getElementById('startup-subtitle').textContent = T('startupSubtitle');
+  document.getElementById('startup-caption').textContent = T('startupCaption');
   document.getElementById('gauge-label').textContent = T('used');
   document.getElementById('disk-info').textContent = T('loading');
   document.getElementById('hero-desc').textContent = T('heroDesc');
@@ -1417,7 +1571,7 @@ function applyLang() {
 
 async function switchLang(lang) {
   currentLang = lang;
-  await postJson('/api/lang', { lang: lang });
+  await bridgeApi.setLanguage(lang);
   applyLang();
   const resultViewVisible = !document.getElementById('view-result').classList.contains('hidden');
   if (resultData && resultViewVisible) {
@@ -1426,18 +1580,23 @@ async function switchLang(lang) {
 }
 
 async function initLang() {
-  const r = await fetch('/api/lang').then(r => r.json());
-  currentLang = r.lang || 'zh';
+  try {
+    const r = await bridgeApi.getLanguage();
+    currentLang = r.lang || currentLang;
+  } catch (_) {}
 }
 
-initLang().then(() => {
-  applyLang();
+function bootstrapApp() {
   initScopes();
-  loadDisk();
-  loadPerm();
-  notifyBootstrapReady();
+  applyLang();
   hideStartupScreen();
-});
+  notifyBootstrapReady();
+  initLang().then(() => {
+    applyLang();
+  });
+}
+
+bootstrapApp();
 </script>
 </body>
 </html>

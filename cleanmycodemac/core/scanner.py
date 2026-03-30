@@ -22,9 +22,23 @@ CLEANERS = [
     MediaScanner(),
 ]
 CLEANERS_BY_CATEGORY = {cleaner.CATEGORY: cleaner for cleaner in CLEANERS}
+HEAVY_SCAN_CATEGORIES = {"dev_cache", "document", "media"}
 
 def get_category_names():
     return {c.CATEGORY: c.DISPLAY_NAME for c in CLEANERS}
+
+
+def _max_workers_for(selected_categories: list[str]) -> int:
+    total = len(selected_categories)
+    if total <= 1:
+        return 1
+
+    heavy_count = sum(1 for category in selected_categories if category in HEAVY_SCAN_CATEGORIES)
+    if heavy_count >= 2:
+        return 1
+    if heavy_count == 1:
+        return min(2, total)
+    return min(3, total)
 
 
 class Scanner:
@@ -58,7 +72,8 @@ class Scanner:
                     done_callback(result)
                 return
 
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            max_workers = _max_workers_for(selected_categories)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {}
                 for cleaner in cleaners:
                     if self._stop_event.is_set():
