@@ -226,6 +226,11 @@ enum AppMetadata {
     }
 
     static func currentVersion() -> String {
+        if isRunningBundledApp(),
+           let version = normalizedVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+        {
+            return version
+        }
         if let version = normalizedVersion(ProcessInfo.processInfo.environment["APP_VERSION"]) {
             return version
         }
@@ -248,6 +253,10 @@ enum AppMetadata {
             return version
         }
         return defaultVersion
+    }
+
+    private static func isRunningBundledApp() -> Bool {
+        Bundle.main.bundleURL.pathExtension.lowercased() == "app"
     }
 
     private static func normalizedVersion(_ raw: String?) -> String? {

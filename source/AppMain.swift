@@ -60,6 +60,80 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    @objc
+    private func showAboutPanel(_ sender: Any?) {
+        NSApp.orderFrontStandardAboutPanel([
+            "ApplicationName": "CleanMyCodeMac",
+            "ApplicationVersion": AppMetadata.currentVersion(),
+            "Version": AppMetadata.currentVersion(),
+            "Copyright": "© killy"
+        ])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc
+    private func showPreferencesPlaceholder(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "CleanMyCodeMac"
+        alert.informativeText = "Settings are currently managed in the main window."
+        alert.runModal()
+    }
+
+    func buildMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+
+        let appMenu = NSMenu()
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "CleanMyCodeMac"
+
+        let aboutItem = NSMenuItem(
+            title: "About \(appName)",
+            action: #selector(showAboutPanel(_:)),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(NSMenuItem.separator())
+
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showPreferencesPlaceholder(_:)),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
+
+        appMenu.addItem(withTitle: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(
+            title: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        appMenuItem.submenu = appMenu
+
+        let windowMenuItem = NSMenuItem()
+        mainMenu.addItem(windowMenuItem)
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        NSApp.windowsMenu = windowMenu
+
+        return mainMenu
+    }
 }
 
 @main
@@ -69,6 +143,7 @@ struct CleanMyCodeMacMain {
         let delegate = AppDelegate()
         app.delegate = delegate
         app.setActivationPolicy(.regular)
+        app.mainMenu = delegate.buildMainMenu()
         app.run()
     }
 }
