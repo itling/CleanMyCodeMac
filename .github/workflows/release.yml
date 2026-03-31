@@ -26,10 +26,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Make scripts executable
         run: chmod +x build_dmg.sh build_icon.sh sign_and_notarize.sh
@@ -41,14 +41,12 @@ jobs:
             exit 0
           fi
 
-          PYTHON_BIN="$(command -v python3)" \
           ./build_icon.sh
 
       - name: Build DMG
-        run: |
-          PYTHON_BIN="$(command -v python3)" \
-          PIP_BIN="$(command -v pip3)" \
-          ./build_dmg.sh ${{ matrix.arch }}
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: ./build_dmg.sh ${{ matrix.arch }}
 
       - name: Import Developer ID certificate
         env:
@@ -64,16 +62,7 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
 
-          python - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          cert = os.environ["APPLE_CERTIFICATE_P12"]
-          path = Path(os.environ["RUNNER_TEMP"]) / "developer-id.p12"
-          path.write_bytes(base64.b64decode(cert))
-          print(f"Wrote certificate to {path}")
-          PY
+          printf '%s' "$APPLE_CERTIFICATE_P12" | /usr/bin/openssl base64 -d -A -out "$CERT_PATH"
 
           security create-keychain -p "" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"

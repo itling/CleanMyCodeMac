@@ -1,12 +1,12 @@
 # CleanMyCodeMac 打包说明
 
-该项目可在 macOS 上通过 `PyInstaller` 打包为 `.app`，再通过 `hdiutil` 打包为 `.dmg`。
+该项目通过 Swift Package Manager 构建原生 macOS `.app`，再通过 `hdiutil` 打包为 `.dmg`。
 
 ## 前置条件
 
-- macOS
-- 可用的 Python 3 环境
-- 已创建虚拟环境，或通过环境变量覆盖 `PYTHON_BIN` / `PIP_BIN`
+- macOS 13.0+
+- Xcode 16.4+ 或兼容的 Swift 6.1 工具链
+- macOS 自带的 `hdiutil`、`codesign`、`xcrun`
 
 ## 一键构建
 
@@ -19,8 +19,8 @@ chmod +x build_dmg.sh
 
 默认会按当前机器架构生成一套产物，例如：
 
-- `dist/x86_64/CleanMyCodeMac.app`
-- `dist/CleanMyCodeMac-x86_64.dmg`
+- `dist/arm64/CleanMyCodeMac.app`
+- `dist/CleanMyCodeMac-arm64.dmg`
 
 也可以显式指定架构：
 
@@ -37,30 +37,35 @@ chmod +x build_dmg.sh
 - `dist/arm64/CleanMyCodeMac.app`
 - `dist/CleanMyCodeMac-arm64.dmg`
 
+如果你希望界面和 app bundle 元数据展示指定版本号，可以通过环境变量传入：
+
+```bash
+APP_VERSION=1.2.3 ./build_dmg.sh
+```
+
+如果没有显式传 `APP_VERSION`，构建脚本也会回退读取项目根目录下的 `.env`：
+
+```bash
+APP_VERSION=1.2.3
+```
+
 ## 应用图标
 
-如果你准备了 `resources/app_icon.png`，可以先生成 `.icns`：
+如果你更新了 `resources/app_icon.png`，可以先重新生成 `.icns`：
 
 ```bash
 chmod +x build_icon.sh
 ./build_icon.sh
 ```
 
-生成后，`CleanMyCodeMac.spec` 会自动使用 `resources/app.icns`。
-
-## 可选环境变量
-
-如果你的 Python 或 pip 不在默认虚拟环境里，可以这样执行：
-
-```bash
-PYTHON_BIN=/path/to/python3 PIP_BIN=/path/to/pip3 ./build_dmg.sh
-```
+生成后会写入 `resources/app.icns`。Release workflow 会优先使用仓库中已提交的 `app.icns`，缺失时才回退到 `./build_icon.sh`。
 
 ## 说明
 
-- 构建脚本会在检测到缺少 `PyInstaller` 时自动安装 `requirements-build.txt` 中的依赖。
+- 构建脚本会通过 `swift build --configuration release` 生成 Swift 可执行文件。
+- `resources/ui/index.html` 会被复制进 app bundle，发布产物不依赖仓库相对路径。
 - `dmg` 内会包含 `CleanMyCodeMac.app` 和指向 `/Applications` 的快捷方式，便于用户拖拽安装。
-- 生成 `arm64` / `x86_64` 时，当前 Python 与 PyInstaller 环境需要支持目标架构，否则 PyInstaller 会报错。
+- 生成 `arm64` / `x86_64` 时，本机 Swift 工具链需要支持对应架构。
 
 ## 签名与公证
 
@@ -75,6 +80,13 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 ```
 
 如果只提供 `DEVELOPER_ID_APP`，脚本会完成签名并跳过 notarization。
+
+本地开发时，`sign_and_notarize.sh` 也会回退读取项目根目录 `.env` 中的这些变量：
+
+- `DEVELOPER_ID_APP`
+- `APPLE_ID`
+- `TEAM_ID`
+- `APP_PASSWORD`
 
 ## GitHub Release 自动发布
 

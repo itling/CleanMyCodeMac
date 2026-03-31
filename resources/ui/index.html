@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CleanMyCodeMac</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="startup-screen" class="startup-screen">
+  <div class="startup-card">
+    <div class="startup-orb">
+      <div class="startup-glow"></div>
+    </div>
+    <div class="startup-title" id="startup-title">CleanMyCodeMac</div>
+    <div class="startup-subtitle" id="startup-subtitle">Inspecting local storage, preparing cleanup tools, and loading the desktop shell.</div>
+    <div class="startup-bar"><div class="startup-bar-fill"></div></div>
+    <div class="startup-caption" id="startup-caption">Starting Up</div>
+  </div>
+</div>
+<div class="app">
+  <div class="sidebar">
+    <h2>CleanMyCodeMac</h2>
+    <div class="gauge">
+      <svg viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="#2D3F55" stroke-width="10"
+                stroke-dasharray="236" stroke-dashoffset="79" transform="rotate(135 60 60)" stroke-linecap="round"/>
+        <circle id="gauge-arc" cx="60" cy="60" r="50" fill="none" stroke="#10B981" stroke-width="10"
+                stroke-dasharray="236" stroke-dashoffset="236" transform="rotate(135 60 60)" stroke-linecap="round"/>
+      </svg>
+      <div class="gauge-text">
+        <div class="gauge-pct" id="gauge-pct">--%</div>
+        <div class="gauge-label" id="gauge-label"></div>
+      </div>
+    </div>
+    <div class="disk-info" id="disk-info"></div>
+    <div class="perm-status" id="perm-status"></div>
+    <div class="lang-switch" id="lang-switch"></div>
+    <div class="version">
+      <span class="about-label" id="about-label"></span>
+      <div><span id="author-label"></span>: killy</div>
+      <div><span id="email-label"></span>: 3168582@qq.com</div>
+      <div class="version-row">
+        <span id="version-label"></span>: <span id="version-value">v1.0.0</span>
+        <button id="update-btn" class="update-btn hidden" onclick="openUpdateDownload()"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- 首页 -->
+    <div id="view-home">
+      <div class="hero">
+        <h1>CleanMyCodeMac</h1>
+        <p id="hero-desc"></p>
+        <div class="hero-actions">
+          <button class="btn-scan" id="btn-start-scan" onclick="startScan()"></button>
+          <button class="btn-ghost" id="btn-select-all" onclick="selectAllScopes(true)"></button>
+          <button class="btn-ghost" id="btn-clear-all" onclick="selectAllScopes(false)"></button>
+        </div>
+      </div>
+      <div class="scope-head">
+        <div class="cards-title" id="scope-title"></div>
+        <div class="scope-summary" id="scope-summary"></div>
+      </div>
+      <div class="cards" id="scope-cards"></div>
+    </div>
+
+    <div id="view-scan" class="hidden">
+      <div class="scan-view">
+        <div class="spinner"></div>
+        <div class="scan-title" id="scan-title"></div>
+        <div class="scan-sub" id="scan-label"></div>
+        <div class="scan-scope"><span class="scan-scope-label" id="scan-scope-label"></span><span class="scan-scope-value" id="scan-scope"></span></div>
+        <div class="progress-bar"><div class="progress-fill" id="scan-bar" style="width:0%"></div></div>
+        <div class="scan-pct" id="scan-pct">0%</div>
+        <div class="scan-log" id="scan-log"></div>
+      </div>
+    </div>
+
+    <div id="view-result" class="hidden" style="display:none;flex-direction:column;flex:1;">
+      <div class="result-top">
+        <div class="result-icon">
+          <svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="26" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/><text x="28" y="34" text-anchor="middle" font-size="24" fill="#F97316">!</text></svg>
+        </div>
+        <div class="result-info">
+          <h2><span id="result-found-label"></span> <span id="result-total">--</span></h2>
+          <div class="sel"><span id="result-selected-label"></span> <strong id="result-selected">--</strong></div>
+        </div>
+        <div class="result-actions">
+          <button class="btn-back" id="btn-back" onclick="showView('home')"></button>
+          <button class="btn-lite" id="btn-select-result" onclick="toggleAllResultSelection(true)"></button>
+          <button class="btn-lite" id="btn-deselect-result" onclick="toggleAllResultSelection(false)"></button>
+          <button class="btn-clean" id="btn-clean" onclick="doClean()"></button>
+        </div>
+      </div>
+      <div class="cat-list" id="cat-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="analysis-mask" class="analysis-mask" onclick="closeAnalysis(event)">
+  <div class="analysis-panel" onclick="event.stopPropagation()">
+    <div class="analysis-head">
+      <h3 id="analysis-title"></h3>
+      <button class="analysis-close" onclick="closeAnalysis()">&times;</button>
+    </div>
+    <div class="analysis-body" id="analysis-body"></div>
+  </div>
+</div>
+
+<div id="dialog-mask" class="dialog-mask" onclick="closeDialog(false)">
+  <div class="dialog-panel" onclick="event.stopPropagation()">
+    <div class="dialog-head"><div class="dialog-title" id="dialog-title"></div></div>
+    <div class="dialog-body" id="dialog-body"></div>
+    <div class="dialog-actions" id="dialog-actions"></div>
+  </div>
+</div>
+
+<div id="toast-wrap" class="toast-wrap"></div>
+
+<script src="./app.js"></script>
+</body>
+</html>

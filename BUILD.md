@@ -1,14 +1,14 @@
 # CleanMyCodeMac Build Guide
 
-This project can be packaged as a `.app` on macOS using `PyInstaller`, then wrapped into a `.dmg` with `hdiutil`.
+This project is packaged as a native macOS `.app` with Swift Package Manager, then wrapped into a `.dmg` with `hdiutil`.
 
 [中文文档](BUILD_ZH.md)
 
 ## Prerequisites
 
-- macOS
-- A working Python 3 environment
-- A virtual environment set up, or override `PYTHON_BIN` / `PIP_BIN` via environment variables
+- macOS 13.0+
+- Xcode 16.4+ or a compatible Swift 6.1 toolchain
+- `hdiutil`, `codesign`, and `xcrun` are available by default on macOS
 
 ## One-Step Build
 
@@ -21,8 +21,8 @@ chmod +x build_dmg.sh
 
 By default, it builds for the current machine's architecture, e.g.:
 
-- `dist/x86_64/CleanMyCodeMac.app`
-- `dist/CleanMyCodeMac-x86_64.dmg`
+- `dist/arm64/CleanMyCodeMac.app`
+- `dist/CleanMyCodeMac-arm64.dmg`
 
 You can also specify the target architecture explicitly:
 
@@ -39,30 +39,35 @@ When building both architectures, the output will be:
 - `dist/arm64/CleanMyCodeMac.app`
 - `dist/CleanMyCodeMac-arm64.dmg`
 
+If you want the app UI and bundle metadata to show a custom version, pass it in via environment variable:
+
+```bash
+APP_VERSION=1.2.3 ./build_dmg.sh
+```
+
+If `APP_VERSION` is not set, the build script also falls back to `.env` in the project root:
+
+```bash
+APP_VERSION=1.2.3
+```
+
 ## App Icon
 
-If you have `resources/app_icon.png`, generate the `.icns` first:
+If you update `resources/app_icon.png`, regenerate the `.icns` first:
 
 ```bash
 chmod +x build_icon.sh
 ./build_icon.sh
 ```
 
-After generation, `CleanMyCodeMac.spec` will automatically use `resources/app.icns`.
-
-## Custom Python Path
-
-If your Python or pip is not in the default virtual environment:
-
-```bash
-PYTHON_BIN=/path/to/python3 PIP_BIN=/path/to/pip3 ./build_dmg.sh
-```
+The release workflow prefers the committed `resources/app.icns`. If it is missing, CI falls back to `./build_icon.sh`.
 
 ## Notes
 
-- The build script automatically installs `requirements-build.txt` if `PyInstaller` is not found.
+- The build script uses `swift build --configuration release`.
+- `resources/ui/index.html` is copied into the app bundle, so the shipped app does not depend on repo-relative files.
 - The `.dmg` includes `CleanMyCodeMac.app` and an `/Applications` symlink for drag-to-install.
-- When targeting `arm64` / `x86_64`, the current Python and PyInstaller environment must support the target architecture.
+- When targeting `arm64` / `x86_64`, the local Swift toolchain must support that architecture.
 
 ## Signing and Notarization
 
@@ -77,6 +82,13 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 ```
 
 If only `DEVELOPER_ID_APP` is provided, the script will sign and skip notarization.
+
+For local development, `sign_and_notarize.sh` also falls back to the project root `.env` for:
+
+- `DEVELOPER_ID_APP`
+- `APPLE_ID`
+- `TEAM_ID`
+- `APP_PASSWORD`
 
 ## GitHub Release Automation
 

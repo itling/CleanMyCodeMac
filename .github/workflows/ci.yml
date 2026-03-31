@@ -5,18 +5,30 @@ on:
   pull_request:
 
 jobs:
-  syntax-check:
-    runs-on: ubuntu-latest
+  build-and-package:
+    runs-on: macos-14
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Verify Python syntax
+      - name: Show toolchain
         run: |
-          python -m py_compile cleanmycodemac/web_app.py cleanmycodemac/utils/i18n.py
-          python -m compileall cleanmycodemac
+          xcodebuild -version
+          swift --version
+
+      - name: Make scripts executable
+        run: chmod +x build_dmg.sh build_icon.sh run.command sign_and_notarize.sh
+
+      - name: Ensure app icon
+        run: |
+          if [[ -f "resources/app.icns" ]]; then
+            echo "Using committed app.icns from repository."
+            exit 0
+          fi
+          ./build_icon.sh
+
+      - name: Build Swift package
+        run: swift build
+
+      - name: Build installable app bundle
+        run: ./build_dmg.sh arm64

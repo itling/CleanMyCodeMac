@@ -4,13 +4,35 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="CleanMyCodeMac"
-APP_PATH="${APP_PATH:-$PROJECT_DIR/dist/CleanMyCodeMac.app}"
+APP_PATH="${APP_PATH:-}"
 DMG_PATH="${DMG_PATH:-}"
 
-APPLE_ID="${APPLE_ID:-}"
-TEAM_ID="${TEAM_ID:-}"
-APP_PASSWORD="${APP_PASSWORD:-}"
-DEVELOPER_ID_APP="${DEVELOPER_ID_APP:-}"
+read_dotenv_value() {
+  local key="$1"
+  local env_file="$PROJECT_DIR/.env"
+  local line=""
+  local value=""
+
+  [[ -f "$env_file" ]] || return 1
+
+  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$env_file" | tail -n 1 || true)"
+  [[ -n "$line" ]] || return 1
+
+  value="${line#*=}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+
+  if [[ "$value" =~ ^\".*\"$ ]] || [[ "$value" =~ ^\'.*\'$ ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
+APPLE_ID="${APPLE_ID:-$(read_dotenv_value APPLE_ID || true)}"
+TEAM_ID="${TEAM_ID:-$(read_dotenv_value TEAM_ID || true)}"
+APP_PASSWORD="${APP_PASSWORD:-$(read_dotenv_value APP_PASSWORD || true)}"
+DEVELOPER_ID_APP="${DEVELOPER_ID_APP:-$(read_dotenv_value DEVELOPER_ID_APP || true)}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -51,6 +73,27 @@ resolve_default_dmg_path() {
   echo "$direct_path"
 }
 
+resolve_default_app_path() {
+  local direct_path="$PROJECT_DIR/dist/${APP_NAME}.app"
+  local inferred_path=""
+  local matches=()
+
+  if [[ -d "$direct_path" ]]; then
+    echo "$direct_path"
+    return 0
+  fi
+
+  shopt -s nullglob
+  matches=("$PROJECT_DIR"/dist/*/"$APP_NAME".app)
+  shopt -u nullglob
+  if [[ ${#matches[@]} -gt 0 ]]; then
+    echo "${matches[0]}"
+    return 0
+  fi
+
+  echo "$direct_path"
+}
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This script only runs on macOS."
   exit 1
@@ -63,6 +106,10 @@ if [[ -z "$DEVELOPER_ID_APP" ]]; then
   echo "Please set the signing certificate, e.g.:"
   echo 'DEVELOPER_ID_APP="Developer ID Application: Your Name (TEAMID)" ./sign_and_notarize.sh'
   exit 1
+fi
+
+if [[ -z "$APP_PATH" ]]; then
+  APP_PATH="$(resolve_default_app_path)"
 fi
 
 if [[ ! -d "$APP_PATH" ]]; then

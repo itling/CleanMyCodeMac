@@ -1,32 +1,27 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-*.egg
+# Swift / build output
+.build/
 dist/
 build/
 
-# Virtual environment
-venv/
-.venv/
+# Environment files
+.env
 
 # macOS
 .DS_Store
 *.icns
 !resources/app.icns
 
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# PyInstaller
-*.manifest
-*.spec.bak
-
-# App config (user-specific)
-.cleanmycodemac_config.json
 
 # Claude Code
 .claude/

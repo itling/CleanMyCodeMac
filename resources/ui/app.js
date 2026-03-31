@@ -1,735 +1,3 @@
-"""CleanMyCodeMac - 本地原生窗口 UI，基于 pywebview + 内嵌 HTML"""
-
-import threading
-import queue
-
-from core.scanner import Scanner, get_category_names
-from core.disk_info import get_disk_info
-from core.permissions import check_full_disk_access, check_trash_access, request_full_disk_access
-from core.analyzer import analyze_path
-from core.cleaners import (
-    SystemCacheCleaner, AppCacheCleaner, LogsCleaner,
-    DownloadsAnalyzer, LargeFileScanner, TrashCleaner,
-    DevCacheCleaner, DocumentScanner, MediaScanner,
-)
-from models.scan_item import format_size
-from models.scan_result import ScanResult
-from utils.subprocess_utils import reveal_in_finder
-from utils.i18n import get_lang, set_lang, t, STRINGS
-
-CLEANER_MAP = {
-    "system_cache": SystemCacheCleaner(),
-    "app_cache":    AppCacheCleaner(),
-    "log":          LogsCleaner(),
-    "download":     DownloadsAnalyzer(),
-    "large_file":   LargeFileScanner(),
-    "trash":        TrashCleaner(),
-    "dev_cache":    DevCacheCleaner(),
-    "document":     DocumentScanner(),
-    "media":        MediaScanner(),
-}
-
-SCAN_PROGRESS_IDLE = {
-    "status": "idle",
-    "percent": 0,
-    "label": "",
-    "label_key": "",
-    "label_args": {},
-    "logs": [],
-}
-
-# 全局状态
-scan_result: ScanResult = None
-scan_progress = SCAN_PROGRESS_IDLE.copy()
-scan_queue = queue.Queue()
-scanner = None
-scan_options = {"categories": list(CLEANER_MAP.keys())}
-
-def _language_payload():
-    return {"lang": get_lang(), "strings": STRINGS.get(get_lang(), {})}
-
-
-def _permissions_payload():
-    return {"fda": check_full_disk_access(), "trash": check_trash_access()}
-
-
-def _missing_path_payload():
-    return {"ok": False, "error": t("error.missing_path")}
-
-
-def _reset_scan_progress():
-    scan_progress.update({
-        **SCAN_PROGRESS_IDLE,
-        "status": "scanning",
-        "label": t("ui.init"),
-        "label_key": "ui.init",
-    })
-
-
-def _set_scan_done(result: ScanResult):
-    global scan_result
-    scan_result = result
-    scan_progress["status"] = "done"
-    scan_progress["percent"] = 100
-    scan_progress["label"] = t("ui.scan_done")
-
-
-def _deduped_size(items, selected_only: bool = False) -> int:
-    filtered_items = [item for item in items if item.selected] if selected_only else list(items)
-    items_by_depth = sorted(filtered_items, key=lambda i: str(i.path).count('/'))
-    counted: list[str] = []
-    total = 0
-
-    for item in items_by_depth:
-        path_str = str(item.path)
-        if path_str in counted:
-            continue
-        if any(path_str.startswith(parent + '/') for parent in counted):
-            continue
-        counted.append(path_str)
-        total += item.size_bytes
-
-    return total
-
-
-def _group_description(app_items):
-    first_item = app_items[0]
-    if len(app_items) == 1:
-        return (
-            t(first_item.description_key, **first_item.description_args)
-            if first_item.description_key else first_item.description
-        )
-
-    dates = sorted(
-        item.last_modified.strftime("%Y-%m-%d")
-        for item in app_items
-        if item.last_modified is not None
-    )
-    if not dates:
-        return t("desc.group_summary", count=len(app_items))
-    if dates[0] == dates[-1]:
-        return t("desc.group_summary_date", count=len(app_items), date=dates[0])
-    return t("desc.group_summary_range", count=len(app_items), start=dates[0], end=dates[-1])
-
-
-def _representative_item(items):
-    if not items:
-        return None
-
-    # Prefer the least destructive cleaning strategy when a path appears in multiple categories.
-    for item in items:
-        if not item.is_safe:
-            return item
-    return items[0]
-
-
-def _matching_items(category=None, app_name=None):
-    if not scan_result:
-        return []
-
-    matched = []
-    for item in scan_result.items:
-        if category is not None and item.category != category:
-            continue
-        display_name = (
-            t(item.app_name_key, **item.app_name_args)
-            if item.app_name_key else item.app_name
-        )
-        if app_name is not None and item.app_name != app_name and display_name != app_name:
-            continue
-        matched.append(item)
-    return matched
-
-
-def _set_selected_for_paths(path_strs, selected):
-    if not scan_result:
-        return _selected_size_payload()
-
-    target_paths = {path_str for path_str in (path_strs or []) if path_str is not None}
-    if not target_paths:
-        return _selected_size_payload()
-
-    for item in scan_result.items:
-        if str(item.path) in target_paths:
-            item.selected = selected
-
-    return _selected_size_payload()
-
-
-def _set_path_selected(path_str, selected):
-    return _set_selected_for_paths([path_str], selected)
-
-
-def _set_category_selected(category, app_name=None, selected=True):
-    matching_paths = {str(item.path) for item in _matching_items(category=category, app_name=app_name)}
-    return _set_selected_for_paths(matching_paths, selected)
-
-
-def _set_all_selected(selected=True):
-    if scan_result:
-        for item in scan_result.items:
-            item.selected = selected
-    return _selected_size_payload()
-
-
-def _clean_selected_paths(paths):
-    paths_to_clean = set(paths or [])
-    if not scan_result or not paths_to_clean:
-        return {"error": t("error.no_selection")}
-
-    items_by_path = {}
-    for item in scan_result.items:
-        if str(item.path) in paths_to_clean:
-            items_by_path.setdefault(str(item.path), []).append(item)
-
-    items_by_category = {}
-    for _, duplicate_items in items_by_path.items():
-        representative = _representative_item(duplicate_items)
-        if representative is None:
-            continue
-        items_by_category.setdefault(representative.category, []).append(representative)
-
-    freed = 0
-    errors = []
-    for category, items in items_by_category.items():
-        cleaner = CLEANER_MAP.get(category)
-        if not cleaner:
-            continue
-        report = cleaner.clean(items)
-        freed += report.cleaned_bytes
-        errors.extend(report.failed)
-
-    return {
-        "freed": format_size(freed),
-        "freed_bytes": freed,
-        "errors": len(errors),
-    }
-
-
-class AppBridge:
-    def __init__(self):
-        self.window = None
-        self._shown = False
-
-    def bind_window(self, window):
-        self.window = window
-
-    def on_bootstrap_ready(self):
-        if self.window and not self._shown:
-            self.window.show()
-            self._shown = True
-        return {"ok": True}
-
-    def get_disk(self):
-        return get_disk_info()
-
-    def get_scan_progress(self):
-        return scan_progress
-
-    def get_scan_result(self):
-        return _serialize_scan_result(scan_result)
-
-    def get_permissions(self):
-        return _permissions_payload()
-
-    def get_language(self):
-        return _language_payload()
-
-    def start_scan(self, categories=None):
-        categories = categories or list(CLEANER_MAP.keys())
-        do_scan(categories)
-        return {"ok": True, "categories": scan_options["categories"]}
-
-    def clean_paths(self, paths):
-        return _clean_selected_paths(paths)
-
-    def select_path(self, path_str, selected):
-        return _set_path_selected(path_str, selected)
-
-    def select_category(self, category, app_name=None, selected=True):
-        return _set_category_selected(category, app_name=app_name, selected=selected)
-
-    def select_all(self, selected=True):
-        return _set_all_selected(selected)
-
-    def reveal_path(self, target):
-        if not target:
-            return _missing_path_payload()
-        return {"ok": reveal_in_finder(target)}
-
-    def analyze_target(self, target):
-        if not target:
-            return {"error": t("error.missing_path")}
-        return analyze_path(target)
-
-    def open_permission_settings(self):
-        request_full_disk_access()
-        return {"ok": True}
-
-    def set_language(self, lang="zh"):
-        set_lang(lang, save=True)
-        return _language_payload()
-
-
-def _serialize_scan_result(result: ScanResult | None):
-    if not result:
-        return None
-
-    data = {}
-    for cat, items in result.by_category().items():
-        by_app = {}
-        for item in items:
-            group_key = item.app_name_key or item.app_name
-            by_app.setdefault(group_key, []).append(item)
-
-        sub_groups = []
-        for group_key, app_items in by_app.items():
-            app_size = sum(x.size_bytes for x in app_items)
-            app_selected = sum(x.size_bytes for x in app_items if x.selected)
-            all_safe = all(x.is_safe for x in app_items)
-            any_selected = any(x.selected for x in app_items)
-            all_selected = all(x.selected for x in app_items)
-            first_item = app_items[0]
-            app_name = (
-                t(first_item.app_name_key, **first_item.app_name_args)
-                if first_item.app_name_key else first_item.app_name
-            )
-            description = _group_description(app_items)
-            files = [{
-                "path": str(x.path),
-                "path_short": x.path_str,
-                "size": x.size_bytes,
-                "size_display": x.size_display,
-                "selected": x.selected,
-                "is_safe": x.is_safe,
-                "can_analyze": x.category == "large_file",
-                "description": t(x.description_key, **x.description_args) if x.description_key else x.description,
-            } for x in app_items]
-            sub_groups.append({
-                "app_name": app_name,
-                "description": description,
-                "size": app_size,
-                "size_display": format_size(app_size),
-                "selected_size": app_selected,
-                "selected_display": format_size(app_selected),
-                "is_safe": all_safe,
-                "any_selected": any_selected,
-                "all_selected": all_selected,
-                "file_count": len(files),
-                "primary_path": files[0]["path"] if files else "",
-                "can_analyze": app_items[0].category == "large_file" and len(files) == 1,
-                "files": files,
-            })
-
-        sub_groups.sort(key=lambda g: g["size"], reverse=True)
-        cat_size = sum(i.size_bytes for i in items)
-        cat_selected = sum(i.size_bytes for i in items if i.selected)
-        data[cat] = {
-            "name": get_category_names().get(cat, cat),
-            "size": cat_size,
-            "size_display": format_size(cat_size),
-            "selected_size": cat_selected,
-            "selected_display": format_size(cat_selected),
-            "any_selected": any(i.selected for i in items),
-            "all_selected": all(i.selected for i in items),
-            "sub_groups": sub_groups,
-        }
-
-    total = _deduped_size(result.items)
-    selected = _deduped_size(result.items, selected_only=True)
-    return {
-        "categories": data,
-        "total_items": len(result.items),
-        "total_size": format_size(total),
-        "total_bytes": total,
-        "selected_size": format_size(selected),
-        "selected_bytes": selected,
-    }
-
-
-def _selected_size_payload():
-    selected_size = _deduped_size(scan_result.items, selected_only=True) if scan_result else 0
-    return {"selected_size": format_size(selected_size)}
-
-
-def do_scan(categories=None):
-    global scan_result, scanner, scan_queue, scan_options
-    categories = [cat for cat in (categories or CLEANER_MAP.keys()) if cat in CLEANER_MAP]
-    scan_options = {"categories": categories}
-    _reset_scan_progress()
-    scan_queue = queue.Queue()
-    scanner = Scanner()
-
-    def on_done(result):
-        _set_scan_done(result)
-
-    scanner.scan_all(scan_queue, categories=categories, done_callback=on_done)
-
-    # 后台线程消费队列更新进度
-    def consume():
-        while scan_progress["status"] == "scanning":
-            try:
-                msg = scan_queue.get(timeout=0.1)
-                t = msg.get("type")
-                if t == "progress":
-                    scan_progress["percent"] = msg["value"]
-                    scan_progress["label"] = msg.get("label", "")
-                    scan_progress["label_key"] = msg.get("label_key", "")
-                    scan_progress["label_args"] = msg.get("label_args", {})
-                elif t == "log":
-                    scan_progress["logs"] = [{
-                        "key": msg.get("key", ""),
-                        "args": msg.get("args", {}),
-                    }]
-                elif t == "done":
-                    pass  # done_callback 已处理
-            except queue.Empty:
-                pass
-            except Exception:
-                pass
-
-    threading.Thread(target=consume, daemon=True).start()
-
-def start_server(port=9527):
-    import webview
-
-    bridge = AppBridge()
-    window = webview.create_window(
-        "CleanMyCodeMac",
-        html=HTML_PAGE,
-        js_api=bridge,
-        width=1120,
-        height=720,
-        min_size=(800, 500),
-        background_color="#0F172A",
-    )
-    bridge.bind_window(window)
-
-    webview.start()
-    print("Exited")
-
-
-# ──────────────────────────────────────────────
-#  HTML 单页应用
-# ──────────────────────────────────────────────
-
-HTML_PAGE = r'''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CleanMyCodeMac</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5F5F5; color: #333; }
-
-.app { display: flex; height: 100vh; }
-.sidebar { width: 200px; background: #1E293B; color: #F1F5F9; padding: 20px 14px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
-.sidebar h2 { font-size: 15px; margin-bottom: 16px; }
-.main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-
-.gauge { position: relative; width: 120px; height: 120px; margin-bottom: 6px; }
-.gauge svg { width: 100%; height: 100%; }
-.gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-.gauge-pct { font-size: 22px; font-weight: 700; }
-.gauge-label { font-size: 10px; color: #94A3B8; margin-top: 2px; }
-.disk-info { font-size: 10px; color: #94A3B8; text-align: center; margin-bottom: 12px; }
-.perm-status { font-size: 10px; color: #94A3B8; text-align: center; margin-top: 12px; border-top: 1px solid #2D3F55; padding-top: 12px; width: 100%; }
-.perm-ok { color: #10B981; }
-.perm-warn { color: #F59E0B; }
-.perm-action { margin-top: 8px; border: 1px solid #475569; background: transparent; color: #E2E8F0; border-radius: 8px; padding: 7px 10px; font-size: 11px; cursor: pointer; }
-.perm-action:hover { background: rgba(255,255,255,0.06); }
-.lang-switch { margin-top: auto; margin-bottom: 8px; display: flex; gap: 4px; }
-.lang-btn { flex: 1; padding: 5px 0; border: 1px solid #475569; background: transparent; color: #94A3B8; border-radius: 6px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
-.lang-btn:hover { background: rgba(255,255,255,0.06); }
-.lang-btn.active { background: rgba(255,255,255,0.12); color: #F1F5F9; border-color: #64748B; }
-.version { font-size: 10px; color: #475569; text-align: center; line-height: 1.7; }
-.version .about-label { color: #94A3B8; display: block; margin-bottom: 4px; }
-
-.hero { background: linear-gradient(135deg, #1E293B 0%, #334155 100%); padding: 56px 32px; text-align: center; }
-.hero h1 { font-size: 28px; color: #F1F5F9; margin-bottom: 8px; }
-.hero p { color: #94A3B8; font-size: 14px; margin-bottom: 28px; }
-.hero-actions { display: flex; justify-content: center; gap: 10px; }
-.btn-scan { background: linear-gradient(135deg, #F97316, #FB923C); color: white; border: none; padding: 14px 36px; font-size: 16px; font-weight: 600; border-radius: 12px; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 4px 14px rgba(249,115,22,0.4); }
-.btn-scan:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(249,115,22,0.5); }
-.btn-ghost { background: rgba(255,255,255,0.08); color: #F8FAFC; border: 1px solid rgba(255,255,255,0.16); padding: 14px 20px; font-size: 14px; font-weight: 600; border-radius: 12px; cursor: pointer; }
-.scope-head { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 0; }
-.cards-title { font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 1px; }
-.scope-summary { font-size: 12px; color: #666; }
-.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 20px 24px 24px; }
-.scope-card { background: white; border-radius: 12px; padding: 16px; border: 1px solid #E8E8E8; position: relative; cursor: pointer; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
-.scope-card:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06); }
-.scope-card.selected { border-color: #3B82F6; box-shadow: 0 0 0 1px rgba(59,130,246,0.15); }
-.scope-card input { position: absolute; right: 14px; top: 14px; width: 18px; height: 18px; accent-color: #3B82F6; pointer-events: none; }
-.card-icon { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-.card h3 { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
-.card p { font-size: 11px; color: #999; line-height: 1.4; }
-
-.scan-view { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 60px; }
-.spinner { width: 56px; height: 56px; border: 5px solid #E8E8E8; border-top-color: #F97316; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.scan-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-.scan-sub { color: #475569; margin-bottom: 14px; font-size: 13px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 999px; padding: 8px 14px; max-width: 420px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); }
-.scan-scope { width: 440px; max-width: 100%; margin-bottom: 14px; padding: 10px 12px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; display: flex; align-items: center; gap: 8px; overflow: hidden; }
-.scan-scope-label { font-size: 11px; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.08em; flex-shrink: 0; }
-.scan-scope-value { font-size: 12px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.progress-bar { width: 400px; height: 6px; background: #E8E8E8; border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, #F97316, #FB923C); border-radius: 3px; transition: width 0.3s; }
-.scan-pct { font-size: 12px; color: #999; margin-bottom: 16px; }
-.scan-log { width: 440px; background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-family: "Menlo", monospace; color: #999; white-space: pre-wrap; line-height: 1.8; overflow: hidden; }
-
-.result-top { background: white; padding: 20px 24px; display: flex; align-items: center; border-bottom: 1px solid #E8E8E8; position: sticky; top: 0; z-index: 10; }
-.result-icon { width: 56px; height: 56px; margin-right: 16px; flex-shrink: 0; }
-.result-icon svg { width: 100%; height: 100%; }
-.result-info { flex: 1; }
-.result-info h2 { font-size: 22px; font-weight: 700; }
-.result-info h2 span { color: #F97316; }
-.result-info .sel { font-size: 13px; color: #F97316; margin-top: 4px; }
-.result-actions { display: flex; gap: 8px; align-items: center; }
-.btn-back { padding: 8px 20px; border: 1px solid #DDD; border-radius: 8px; background: white; font-size: 13px; cursor: pointer; color: #666; }
-.btn-back:hover { background: #F5F5F5; }
-.btn-lite { padding: 8px 14px; border: 1px solid #DDD; border-radius: 8px; background: white; font-size: 12px; cursor: pointer; color: #444; }
-.btn-clean { background: linear-gradient(135deg, #34D399, #10B981); color: white; border: none; padding: 12px 32px; font-size: 15px; font-weight: 600; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 14px rgba(16,185,129,0.3); transition: transform 0.15s; }
-.btn-clean:hover { transform: translateY(-1px); }
-.btn-clean:disabled { background: #CCC; box-shadow: none; cursor: not-allowed; transform: none; }
-
-.cat-list { padding: 16px 20px; flex: 1; }
-.cat-group { background: white; border-radius: 12px; margin-bottom: 12px; border: 1px solid #E8E8E8; overflow: hidden; }
-.cat-header { display: flex; align-items: center; padding: 14px 18px; cursor: pointer; user-select: none; }
-.cat-header:hover { background: #FAFAFA; }
-.cat-check { width: 18px; height: 18px; margin-right: 12px; accent-color: #3B82F6; cursor: pointer; flex-shrink: 0; }
-.cat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; margin-right: 12px; flex-shrink: 0; }
-.cat-name { font-size: 15px; font-weight: 600; }
-.cat-meta { font-size: 12px; color: #999; margin-left: 8px; }
-.cat-meta .sel-size { color: #F97316; font-weight: 500; }
-.cat-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.cat-arrow { font-size: 10px; color: #CCC; transition: transform 0.2s; }
-.cat-arrow.open { transform: rotate(180deg); }
-
-.sub-item { display: flex; align-items: center; padding: 10px 18px 10px 62px; border-top: 1px solid #F0F0F0; }
-.sub-item:hover { background: #FAFAFA; }
-.sub-cb { margin-right: 12px; width: 18px; height: 18px; accent-color: #3B82F6; cursor: pointer; flex-shrink: 0; }
-.sub-name { font-size: 13px; font-weight: 500; min-width: 120px; }
-.sub-desc { font-size: 12px; color: #999; flex: 1; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sub-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.sub-size { font-size: 12px; color: #666; min-width: 80px; text-align: right; }
-.badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
-.badge-safe { color: #10B981; background: #ECFDF5; }
-.badge-warn { color: #F59E0B; background: #FFFBEB; }
-.badge-danger { color: #EF4444; background: #FEF2F2; }
-.badge-clean { color: #10B981; }
-.sub-toggle { font-size: 10px; color: #CCC; cursor: pointer; transition: transform 0.2s; padding: 4px; }
-.sub-toggle.open { transform: rotate(180deg); }
-
-.file-row { display: flex; align-items: center; padding: 8px 18px 8px 96px; border-top: 1px solid #F8F8F8; font-size: 12px; gap: 10px; }
-.file-row:hover { background: #FAFAFA; }
-.file-cb { margin-right: 10px; width: 15px; height: 15px; accent-color: #3B82F6; cursor: pointer; }
-.file-path-wrap { flex: 1; min-width: 0; }
-.file-path { font-family: "Menlo", monospace; font-size: 11px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-hint { font-size: 11px; color: #94A3B8; margin-top: 2px; }
-.file-size { color: #999; font-size: 11px; margin-left: 12px; min-width: 70px; text-align: right; }
-.file-actions { display: flex; align-items: center; gap: 6px; }
-.btn-mini { border: 1px solid #D6DDE7; background: white; color: #475569; border-radius: 6px; padding: 5px 8px; font-size: 11px; cursor: pointer; }
-.btn-mini:hover { background: #F8FAFC; }
-
-.analysis-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.42); display: none; align-items: center; justify-content: center; z-index: 30; }
-.analysis-mask.show { display: flex; }
-.analysis-panel { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; background: white; border-radius: 16px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); }
-.analysis-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border-bottom: 1px solid #E5E7EB; position: sticky; top: 0; background: white; }
-.analysis-head h3 { font-size: 18px; }
-.analysis-close { border: none; background: #F1F5F9; color: #475569; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; }
-.analysis-body { padding: 18px 20px 24px; }
-.analysis-section { margin-bottom: 18px; }
-.analysis-section h4 { font-size: 13px; color: #0F172A; margin-bottom: 8px; }
-.analysis-note { font-size: 12px; color: #475569; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; line-height: 1.6; }
-.analysis-list { border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden; }
-.analysis-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border-top: 1px solid #F1F5F9; font-size: 12px; }
-.analysis-row:first-child { border-top: none; }
-.analysis-name { min-width: 0; flex: 1; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.analysis-size { color: #0F172A; white-space: nowrap; font-weight: 600; }
-.analysis-pre { white-space: pre-wrap; font-family: "Menlo", monospace; font-size: 11px; color: #334155; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 12px; line-height: 1.5; }
-.tree-root { border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden; }
-.tree-node { border-top: 1px solid #F1F5F9; }
-.tree-node:first-child { border-top: none; }
-.tree-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
-.tree-depth-1 .tree-head { padding-left: 28px; }
-.tree-depth-2 .tree-head { padding-left: 44px; }
-.tree-depth-3 .tree-head { padding-left: 60px; }
-.tree-toggle { width: 18px; color: #94A3B8; text-align: center; cursor: pointer; user-select: none; }
-.tree-label { min-width: 0; flex: 1; }
-.tree-name { font-size: 12px; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-meta { font-size: 11px; color: #64748B; margin-top: 2px; }
-.tree-size { min-width: 120px; text-align: right; font-size: 12px; font-weight: 600; color: #0F172A; }
-.tree-children.hidden { display: none; }
-.analysis-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.analysis-chip { border: 1px solid #D8E2EF; background: #F8FAFC; color: #334155; border-radius: 999px; padding: 6px 10px; font-size: 11px; }
-.tree-actions { display: flex; gap: 6px; margin-left: 8px; }
-.analysis-cmd { border: 1px solid #E5E7EB; border-radius: 12px; padding: 12px; margin-top: 10px; background: #FCFCFD; }
-.analysis-cmd-title { font-size: 12px; font-weight: 600; color: #0F172A; margin-bottom: 4px; }
-.analysis-cmd-desc { font-size: 12px; color: #475569; line-height: 1.6; margin-bottom: 8px; }
-.analysis-cmd-code { font-family: "Menlo", monospace; font-size: 11px; color: #0F172A; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; white-space: pre-wrap; }
-.analysis-cmd-actions { margin-top: 8px; }
-.dialog-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.44); display: none; align-items: center; justify-content: center; z-index: 40; }
-.dialog-mask.show { display: flex; }
-.dialog-panel { width: min(420px, calc(100vw - 32px)); background: white; border-radius: 18px; box-shadow: 0 24px 80px rgba(15, 23, 42, 0.30); overflow: hidden; }
-.dialog-head { padding: 18px 20px 10px; }
-.dialog-title { font-size: 18px; font-weight: 700; color: #0F172A; }
-.dialog-body { padding: 0 20px 18px; font-size: 13px; color: #475569; line-height: 1.7; white-space: pre-wrap; }
-.dialog-actions { padding: 14px 20px 20px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid #F1F5F9; }
-.btn-dialog-secondary { padding: 10px 16px; border: 1px solid #D7DEE7; background: white; color: #475569; border-radius: 10px; font-size: 13px; cursor: pointer; }
-.btn-dialog-primary { padding: 10px 18px; border: none; background: linear-gradient(135deg, #F97316, #FB923C); color: white; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.toast-wrap { position: fixed; top: 20px; right: 20px; z-index: 45; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
-.toast { min-width: 280px; max-width: 360px; background: white; border: 1px solid #DDE7F1; border-radius: 14px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18); padding: 14px 16px; transform: translateY(-8px); opacity: 0; transition: opacity 0.22s ease, transform 0.22s ease; }
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast-title { font-size: 13px; font-weight: 700; color: #0F172A; margin-bottom: 4px; }
-.toast-body { font-size: 12px; color: #475569; line-height: 1.6; white-space: pre-wrap; }
-.toast-success { border-color: #BBF7D0; }
-
-.hidden { display: none; }
-.startup-screen { position: fixed; inset: 0; z-index: 60; background:
-  radial-gradient(circle at top, rgba(249,115,22,0.22), transparent 35%),
-  linear-gradient(145deg, #0F172A 0%, #111827 45%, #1E293B 100%);
-  color: #F8FAFC; display: flex; align-items: center; justify-content: center;
-  transition: opacity 0.35s ease, visibility 0.35s ease; }
-.startup-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; display: flex; }
-.startup-card { width: min(420px, calc(100vw - 48px)); text-align: center; }
-.startup-orb { width: 96px; height: 96px; margin: 0 auto 20px; border-radius: 28px;
-  background: linear-gradient(145deg, rgba(249,115,22,0.95), rgba(251,146,60,0.82));
-  box-shadow: 0 20px 50px rgba(249,115,22,0.28), inset 0 1px 0 rgba(255,255,255,0.25);
-  position: relative; display: flex; align-items: center; justify-content: center; }
-.startup-orb::after { content: ''; width: 54px; height: 54px; border-radius: 18px;
-  border: 3px solid rgba(255,255,255,0.9); box-sizing: border-box; }
-.startup-glow { position: absolute; inset: -14px; border-radius: 34px; border: 1px solid rgba(251,146,60,0.28);
-  animation: startupPulse 1.8s ease-in-out infinite; }
-.startup-title { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; margin-bottom: 10px; }
-.startup-subtitle { font-size: 14px; line-height: 1.7; color: #CBD5E1; margin-bottom: 20px; }
-.startup-bar { width: 220px; max-width: 100%; height: 6px; margin: 0 auto 12px; border-radius: 999px;
-  overflow: hidden; background: rgba(148,163,184,0.18); }
-.startup-bar-fill { width: 38%; height: 100%;
-  background: linear-gradient(90deg, rgba(249,115,22,0.1), #F97316, #FDBA74, rgba(249,115,22,0.1));
-  animation: startupSweep 1.5s ease-in-out infinite; }
-.startup-caption { font-size: 12px; color: #94A3B8; letter-spacing: 0.08em; text-transform: uppercase; }
-@keyframes startupSweep {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(420%); }
-}
-@keyframes startupPulse {
-  0%, 100% { transform: scale(0.98); opacity: 0.5; }
-  50% { transform: scale(1.03); opacity: 1; }
-}
-</style>
-</head>
-<body>
-<div id="startup-screen" class="startup-screen">
-  <div class="startup-card">
-    <div class="startup-orb">
-      <div class="startup-glow"></div>
-    </div>
-    <div class="startup-title" id="startup-title">CleanMyCodeMac</div>
-    <div class="startup-subtitle" id="startup-subtitle">Inspecting local storage, preparing cleanup tools, and loading the desktop shell.</div>
-    <div class="startup-bar"><div class="startup-bar-fill"></div></div>
-    <div class="startup-caption" id="startup-caption">Starting Up</div>
-  </div>
-</div>
-<div class="app">
-  <div class="sidebar">
-    <h2>CleanMyCodeMac</h2>
-    <div class="gauge">
-      <svg viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r="50" fill="none" stroke="#2D3F55" stroke-width="10"
-                stroke-dasharray="236" stroke-dashoffset="79" transform="rotate(135 60 60)" stroke-linecap="round"/>
-        <circle id="gauge-arc" cx="60" cy="60" r="50" fill="none" stroke="#10B981" stroke-width="10"
-                stroke-dasharray="236" stroke-dashoffset="236" transform="rotate(135 60 60)" stroke-linecap="round"/>
-      </svg>
-      <div class="gauge-text">
-        <div class="gauge-pct" id="gauge-pct">--%</div>
-        <div class="gauge-label" id="gauge-label"></div>
-      </div>
-    </div>
-    <div class="disk-info" id="disk-info"></div>
-    <div class="perm-status" id="perm-status"></div>
-    <div class="lang-switch" id="lang-switch"></div>
-    <div class="version">
-      <span class="about-label" id="about-label"></span>
-      <div><span id="author-label"></span>: killy</div>
-      <div><span id="email-label"></span>: 3168582@qq.com</div>
-      <div><span id="version-label"></span>: v1.0.0</div>
-    </div>
-  </div>
-
-  <div class="main">
-    <!-- 首页 -->
-    <div id="view-home">
-      <div class="hero">
-        <h1>CleanMyCodeMac</h1>
-        <p id="hero-desc"></p>
-        <div class="hero-actions">
-          <button class="btn-scan" id="btn-start-scan" onclick="startScan()"></button>
-          <button class="btn-ghost" id="btn-select-all" onclick="selectAllScopes(true)"></button>
-          <button class="btn-ghost" id="btn-clear-all" onclick="selectAllScopes(false)"></button>
-        </div>
-      </div>
-      <div class="scope-head">
-        <div class="cards-title" id="scope-title"></div>
-        <div class="scope-summary" id="scope-summary"></div>
-      </div>
-      <div class="cards" id="scope-cards"></div>
-    </div>
-
-    <div id="view-scan" class="hidden">
-      <div class="scan-view">
-        <div class="spinner"></div>
-        <div class="scan-title" id="scan-title"></div>
-        <div class="scan-sub" id="scan-label"></div>
-        <div class="scan-scope"><span class="scan-scope-label" id="scan-scope-label"></span><span class="scan-scope-value" id="scan-scope"></span></div>
-        <div class="progress-bar"><div class="progress-fill" id="scan-bar" style="width:0%"></div></div>
-        <div class="scan-pct" id="scan-pct">0%</div>
-        <div class="scan-log" id="scan-log"></div>
-      </div>
-    </div>
-
-    <div id="view-result" class="hidden" style="display:none;flex-direction:column;flex:1;">
-      <div class="result-top">
-        <div class="result-icon">
-          <svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="26" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/><text x="28" y="34" text-anchor="middle" font-size="24" fill="#F97316">!</text></svg>
-        </div>
-        <div class="result-info">
-          <h2><span id="result-found-label"></span> <span id="result-total">--</span></h2>
-          <div class="sel"><span id="result-selected-label"></span> <strong id="result-selected">--</strong></div>
-        </div>
-        <div class="result-actions">
-          <button class="btn-back" id="btn-back" onclick="showView('home')"></button>
-          <button class="btn-lite" id="btn-select-result" onclick="toggleAllResultSelection(true)"></button>
-          <button class="btn-lite" id="btn-deselect-result" onclick="toggleAllResultSelection(false)"></button>
-          <button class="btn-clean" id="btn-clean" onclick="doClean()"></button>
-        </div>
-      </div>
-      <div class="cat-list" id="cat-list"></div>
-    </div>
-  </div>
-</div>
-
-<div id="analysis-mask" class="analysis-mask" onclick="closeAnalysis(event)">
-  <div class="analysis-panel" onclick="event.stopPropagation()">
-    <div class="analysis-head">
-      <h3 id="analysis-title"></h3>
-      <button class="analysis-close" onclick="closeAnalysis()">&times;</button>
-    </div>
-    <div class="analysis-body" id="analysis-body"></div>
-  </div>
-</div>
-
-<div id="dialog-mask" class="dialog-mask" onclick="closeDialog(false)">
-  <div class="dialog-panel" onclick="event.stopPropagation()">
-    <div class="dialog-head"><div class="dialog-title" id="dialog-title"></div></div>
-    <div class="dialog-body" id="dialog-body"></div>
-    <div class="dialog-actions" id="dialog-actions"></div>
-  </div>
-</div>
-
-<div id="toast-wrap" class="toast-wrap"></div>
-
-<script>
 /* ── i18n ── */
 const UI = {
   zh: {
@@ -759,6 +27,7 @@ const UI = {
     dockerNoResult: '未获取到 Docker CLI 结果，可能是 Docker 未启动或命令不可用。',
     hint: '提示', gotIt: '知道了', confirm: '请确认', cancel: '取消', ok: '确认',
     about: '关于', author: '作者', email: '邮箱', version: '版本', langZh: '中文', langEn: 'EN',
+    updateNow: '更新', updateTo: '更新 {version}',
     alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
     alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
     confirmClean: '即将清理 {n} 个项目。\n缓存/日志等安全项目将直接删除并释放磁盘空间；文档/媒体等项目将移入废纸篓（可恢复）。确认继续？', confirmCleanTitle: '确认清理',
@@ -802,6 +71,7 @@ const UI = {
     dockerNoResult: 'Docker CLI result not available. Docker may not be running.',
     hint: 'Notice', gotIt: 'OK', confirm: 'Confirm', cancel: 'Cancel', ok: 'Confirm',
     about: 'About', author: 'Author', email: 'Email', version: 'Version', langZh: '中文', langEn: 'EN',
+    updateNow: 'Update', updateTo: 'Update {version}',
     alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
     alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
     confirmClean: 'About to clean {n} items.\nSafe items (caches/logs) will be permanently deleted to free disk space. Documents/media will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
@@ -844,6 +114,8 @@ let dialogResolver = null;
 let lastKnownLogs = [];
 let expandedCategories = new Set(CAT_ORDER);
 let expandedSubGroups = new Set();
+let appMeta = { version: '1.0.0', version_display: 'v1.0.0' };
+let updateInfo = { has_update: false, latest_version: '', download_url: '', current_arch: '' };
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
 
@@ -915,6 +187,9 @@ const bridgeApi = {
   analyzeTarget(path) { return callBridge('analyze_target', path); },
   revealPath(path) { return callBridge('reveal_path', path); },
   getLanguage() { return callBridge('get_language'); },
+  getAppMeta() { return callBridge('get_app_meta'); },
+  checkForUpdates() { return callBridge('check_for_updates'); },
+  openExternalUrl(url) { return callBridge('open_external_url', url); },
   setLanguage(lang) { return callBridge('set_language', lang); },
   onBootstrapReady() { return callBridge('on_bootstrap_ready'); },
 };
@@ -1532,6 +807,30 @@ function renderLangSwitch() {
     '<button class="lang-btn' + (currentLang === 'en' ? ' active' : '') + '" onclick="switchLang(\'en\')">' + T('langEn') + '</button>';
 }
 
+function applyAppMeta() {
+  const versionValue = document.getElementById('version-value');
+  if (versionValue) {
+    versionValue.textContent = appMeta.version_display || ('v' + (appMeta.version || '1.0.0'));
+  }
+}
+
+function applyUpdateInfo() {
+  const button = document.getElementById('update-btn');
+  if (!button) return;
+
+  if (!updateInfo.has_update || !updateInfo.download_url) {
+    button.classList.add('hidden');
+    button.textContent = '';
+    button.title = '';
+    return;
+  }
+
+  const version = updateInfo.latest_version ? ('v' + updateInfo.latest_version) : '';
+  button.textContent = T('updateNow');
+  button.title = T('updateTo').replace('{version}', version);
+  button.classList.remove('hidden');
+}
+
 function applyLang() {
   renderLangSwitch();
   document.getElementById('startup-title').textContent = T('startupTitle');
@@ -1563,6 +862,8 @@ function applyLang() {
   document.getElementById('author-label').textContent = T('author');
   document.getElementById('email-label').textContent = T('email');
   document.getElementById('version-label').textContent = T('version');
+  applyAppMeta();
+  applyUpdateInfo();
   renderScopeCards();
   loadDisk();
   loadPerm();
@@ -1586,18 +887,47 @@ async function initLang() {
   } catch (_) {}
 }
 
+async function loadAppMeta() {
+  try {
+    const r = await bridgeApi.getAppMeta();
+    if (r && typeof r === 'object') {
+      appMeta = {
+        version: r.version || appMeta.version,
+        version_display: r.version_display || appMeta.version_display,
+      };
+    }
+  } catch (_) {}
+}
+
+async function loadUpdateInfo() {
+  try {
+    const r = await bridgeApi.checkForUpdates();
+    if (r && typeof r === 'object') {
+      updateInfo = {
+        has_update: Boolean(r.has_update),
+        latest_version: r.latest_version || '',
+        download_url: r.download_url || r.release_url || '',
+        current_arch: r.current_arch || '',
+      };
+      applyUpdateInfo();
+    }
+  } catch (_) {}
+}
+
+async function openUpdateDownload() {
+  if (!updateInfo.download_url) return;
+  await bridgeApi.openExternalUrl(updateInfo.download_url);
+}
+
 function bootstrapApp() {
   initScopes();
   applyLang();
   hideStartupScreen();
   notifyBootstrapReady();
-  initLang().then(() => {
+  Promise.all([initLang(), loadAppMeta()]).then(() => {
     applyLang();
+    loadUpdateInfo();
   });
 }
 
 bootstrapApp();
-</script>
-</body>
-</html>
-'''
