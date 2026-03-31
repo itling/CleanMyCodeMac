@@ -146,6 +146,20 @@ enum BridgeBootstrap {
     """
 }
 
+enum AppBootstrapMetadata {
+    static func script() -> String {
+        let payload = AppMetadata.payload()
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return "window.__cleanMyCodeMacAppMeta = { version: '1.0.0', version_display: 'v1.0.0' };"
+        }
+
+        return "window.__cleanMyCodeMacAppMeta = \(json);"
+    }
+}
+
 enum DiskInfoService {
     static func payload() -> [String: Any] {
         do {

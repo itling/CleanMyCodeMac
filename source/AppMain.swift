@@ -20,6 +20,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             controller.addUserScript(
                 WKUserScript(
+                    source: AppBootstrapMetadata.script(),
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: true
+                )
+            )
+            controller.addUserScript(
+                WKUserScript(
                     source: BridgeBootstrap.postLoadScript,
                     injectionTime: .atDocumentEnd,
                     forMainFrameOnly: true

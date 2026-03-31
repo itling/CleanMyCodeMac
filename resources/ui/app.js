@@ -117,14 +117,18 @@ let lastKnownLogs = [];
 let latestScanState = null;
 let expandedCategories = new Set(CAT_ORDER);
 let expandedSubGroups = new Set();
-let appMeta = { version: '1.0.0', version_display: 'v1.0.0' };
+const initialAppMeta = window.__cleanMyCodeMacAppMeta || {};
+let appMeta = {
+  version: initialAppMeta.version || '1.0.0',
+  version_display: initialAppMeta.version_display || ('v' + (initialAppMeta.version || '1.0.0')),
+};
 let updateInfo = {
   has_update: false,
   latest_version: '',
   download_url: '',
   release_url: 'https://github.com/itling/CleanMyCodeMac/releases/latest',
   current_arch: '',
-  manual_only: true,
+  manual_only: false,
 };
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
@@ -931,13 +935,6 @@ async function loadUpdateInfo() {
   try {
     const r = await bridgeApi.checkForUpdates();
     if (r && typeof r === 'object') {
-      if (r.current_version) {
-        appMeta = {
-          version: r.current_version,
-          version_display: 'v' + r.current_version,
-        };
-        applyAppMeta();
-      }
       updateInfo = {
         has_update: Boolean(r.has_update),
         latest_version: r.latest_version || '',
