@@ -41,6 +41,31 @@ require_cmd() {
   fi
 }
 
+recreate_dmg_from_signed_app() {
+  local app_bundle="$1"
+  local dmg_path="$2"
+  local stage_root
+  local volume_name="$APP_NAME"
+
+  stage_root="$(mktemp -d "${TMPDIR:-/tmp}/cleanmycodemac-sign-XXXXXX")"
+  trap 'rm -rf "$stage_root"' RETURN
+
+  mkdir -p "$stage_root"
+  cp -R "$app_bundle" "$stage_root/"
+  ln -sfn /Applications "$stage_root/Applications"
+  rm -f "$dmg_path"
+
+  hdiutil create \
+    -volname "$volume_name" \
+    -srcfolder "$stage_root" \
+    -ov \
+    -format UDZO \
+    "$dmg_path"
+
+  rm -rf "$stage_root"
+  trap - RETURN
+}
+
 resolve_default_dmg_path() {
   local direct_path="$PROJECT_DIR/dist/${APP_NAME}.dmg"
   local inferred_arch=""
@@ -101,6 +126,7 @@ fi
 
 require_cmd codesign
 require_cmd xcrun
+require_cmd hdiutil
 
 if [[ -z "$DEVELOPER_ID_APP" ]]; then
   echo "Please set the signing certificate, e.g.:"
@@ -125,6 +151,7 @@ codesign --force --deep --options runtime --sign "$DEVELOPER_ID_APP" "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 if [[ -f "$DMG_PATH" ]]; then
+  recreate_dmg_from_signed_app "$APP_PATH" "$DMG_PATH"
   codesign --force --sign "$DEVELOPER_ID_APP" "$DMG_PATH"
 fi
 

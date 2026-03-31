@@ -28,7 +28,7 @@ A macOS disk cleanup tool built for developers.
 
 ## Screenshots
 
-![CleanMyCodeMac home screen](/Users/killy/AweSun/cleanMyCodeMac/resources/screenshots/home-readme.png)
+![CleanMyCodeMac home screen](resources/screenshots/home-readme.png)
 
 ## Quick Start
 

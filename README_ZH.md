@@ -26,7 +26,7 @@
 
 ## 截图
 
-![CleanMyCodeMac 主界面](/Users/killy/AweSun/cleanMyCodeMac/resources/screenshots/home-readme.png)
+![CleanMyCodeMac 主界面](resources/screenshots/home-readme.png)
 
 ## 快速开始
 
