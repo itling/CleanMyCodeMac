@@ -124,7 +124,7 @@ let updateInfo = {
   download_url: '',
   release_url: 'https://github.com/itling/CleanMyCodeMac/releases/latest',
   current_arch: '',
-  manual_only: false,
+  manual_only: true,
 };
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
@@ -922,6 +922,7 @@ async function loadAppMeta() {
         version: r.version || appMeta.version,
         version_display: r.version_display || appMeta.version_display,
       };
+      applyAppMeta();
     }
   } catch (_) {}
 }
@@ -930,6 +931,13 @@ async function loadUpdateInfo() {
   try {
     const r = await bridgeApi.checkForUpdates();
     if (r && typeof r === 'object') {
+      if (r.current_version) {
+        appMeta = {
+          version: r.current_version,
+          version_display: 'v' + r.current_version,
+        };
+        applyAppMeta();
+      }
       updateInfo = {
         has_update: Boolean(r.has_update),
         latest_version: r.latest_version || '',
