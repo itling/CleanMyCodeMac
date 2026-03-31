@@ -320,6 +320,7 @@ enum UpdateService {
         let latestVersion: String
         let currentArch: String
         let hasUpdate: Bool
+        let manualOnly: Bool
         let downloadURL: String
         let releaseURL: String
         let assetName: String
@@ -333,6 +334,7 @@ enum UpdateService {
                 "latest_version": latestVersion,
                 "current_arch": currentArch,
                 "has_update": hasUpdate,
+                "manual_only": manualOnly,
                 "download_url": downloadURL,
                 "release_url": releaseURL,
                 "asset_name": assetName,
@@ -355,12 +357,12 @@ enum UpdateService {
                         completion(.success(payload(for: release)))
                     case .failure(let fallbackError as NSError) where fallbackError.code == 404:
                         completion(.success(emptyPayload()))
-                    case .failure(let fallbackError):
-                        completion(.failure(fallbackError))
+                    case .failure:
+                        completion(.success(manualPayload()))
                     }
                 }
-            case .failure(let error):
-                completion(.failure(error))
+            case .failure:
+                completion(.success(manualPayload()))
             }
         }
     }
@@ -371,7 +373,7 @@ enum UpdateService {
         request.setValue("CleanMyCodeMac", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 8
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        updateSession().dataTask(with: request) { data, response, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -414,7 +416,7 @@ enum UpdateService {
         request.setValue("CleanMyCodeMac", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 8
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        updateSession().dataTask(with: request) { data, response, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -472,6 +474,7 @@ enum UpdateService {
             latestVersion: latestVersion,
             currentArch: currentArch,
             hasUpdate: hasUpdate,
+            manualOnly: false,
             downloadURL: downloadURL,
             releaseURL: release.htmlURL,
             assetName: matchedAsset?.name ?? "",
@@ -487,6 +490,7 @@ enum UpdateService {
             latestVersion: AppMetadata.currentVersion(),
             currentArch: currentArchitecture(),
             hasUpdate: false,
+            manualOnly: false,
             downloadURL: "",
             releaseURL: releasePageURL,
             assetName: "",
@@ -494,6 +498,31 @@ enum UpdateService {
             checkedAt: ISO8601DateFormatter().string(from: Date()),
             fallbackReleaseURL: releasePageURL
         )
+    }
+
+    private static func manualPayload() -> Payload {
+        Payload(
+            currentVersion: AppMetadata.currentVersion(),
+            latestVersion: AppMetadata.currentVersion(),
+            currentArch: currentArchitecture(),
+            hasUpdate: false,
+            manualOnly: true,
+            downloadURL: "",
+            releaseURL: releasePageURL,
+            assetName: "",
+            buttonLabel: "",
+            checkedAt: ISO8601DateFormatter().string(from: Date()),
+            fallbackReleaseURL: releasePageURL
+        )
+    }
+
+    private static func updateSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 8
+        configuration.connectionProxyDictionary = [:]
+        return URLSession(configuration: configuration)
     }
 
     private static func currentArchitecture() -> String {

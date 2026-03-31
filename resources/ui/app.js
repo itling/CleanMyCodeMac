@@ -936,7 +936,7 @@ async function loadUpdateInfo() {
         download_url: r.download_url || r.release_url || '',
         release_url: r.release_url || updateInfo.release_url,
         current_arch: r.current_arch || '',
-        manual_only: false,
+        manual_only: Boolean(r.manual_only),
       };
       applyUpdateInfo();
     }
