@@ -58,10 +58,10 @@ swift run
 
 ### macOS 提示“CleanMyCodeMac”已损坏，无法打开
 
-如果你是从浏览器下载了未签名构建，macOS 可能会拦截。可以先手动清除 quarantine 属性：
+请先确保已经把 app 拖入 `/Applications` 目录，然后再手动清除 quarantine 属性：
 
 ```bash
-xattr -cr /Applications/CleanMyCodeMac.app
+sudo xattr -cr /Applications/CleanMyCodeMac.app
 ```
 
 ## 隐私与权限

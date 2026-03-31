@@ -60,10 +60,10 @@ See [BUILD.md](BUILD.md) for full build instructions.
 
 ### macOS says “CleanMyCodeMac” is damaged and should be moved to Trash
 
-If you downloaded an unsigned build from the browser and macOS blocks it, you can clear the quarantine attribute manually:
+Make sure the app has already been dragged into `/Applications`, then clear the quarantine attribute manually:
 
 ```bash
-xattr -cr /Applications/CleanMyCodeMac.app
+sudo xattr -cr /Applications/CleanMyCodeMac.app
 ```
 
 ## Privacy & Permissions
