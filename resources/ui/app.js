@@ -27,6 +27,7 @@ const UI = {
     dockerNoResult: '未获取到 Docker CLI 结果，可能是 Docker 未启动或命令不可用。',
     hint: '提示', gotIt: '知道了', confirm: '请确认', cancel: '取消', ok: '确认',
     about: '关于', author: '作者', email: '邮箱', version: '版本', langZh: '中文', langEn: 'EN',
+    checkUpdate: '检查更新',
     updateNow: '更新', updateTo: '更新 {version}',
     alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
     alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
@@ -71,6 +72,7 @@ const UI = {
     dockerNoResult: 'Docker CLI result not available. Docker may not be running.',
     hint: 'Notice', gotIt: 'OK', confirm: 'Confirm', cancel: 'Cancel', ok: 'Confirm',
     about: 'About', author: 'Author', email: 'Email', version: 'Version', langZh: '中文', langEn: 'EN',
+    checkUpdate: 'Check Update',
     updateNow: 'Update', updateTo: 'Update {version}',
     alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
     alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
@@ -115,7 +117,14 @@ let lastKnownLogs = [];
 let expandedCategories = new Set(CAT_ORDER);
 let expandedSubGroups = new Set();
 let appMeta = { version: '1.0.0', version_display: 'v1.0.0' };
-let updateInfo = { has_update: false, latest_version: '', download_url: '', current_arch: '' };
+let updateInfo = {
+  has_update: false,
+  latest_version: '',
+  download_url: '',
+  release_url: 'https://github.com/itling/CleanMyCodeMac/releases/latest',
+  current_arch: '',
+  manual_only: false,
+};
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
 
@@ -819,6 +828,13 @@ function applyUpdateInfo() {
   if (!button) return;
 
   if (!updateInfo.has_update || !updateInfo.download_url) {
+    if (updateInfo.manual_only && updateInfo.release_url) {
+      button.textContent = T('checkUpdate');
+      button.title = updateInfo.release_url;
+      button.classList.remove('hidden');
+      return;
+    }
+
     button.classList.add('hidden');
     button.textContent = '';
     button.title = '';
@@ -907,16 +923,27 @@ async function loadUpdateInfo() {
         has_update: Boolean(r.has_update),
         latest_version: r.latest_version || '',
         download_url: r.download_url || r.release_url || '',
+        release_url: r.release_url || updateInfo.release_url,
         current_arch: r.current_arch || '',
+        manual_only: false,
       };
       applyUpdateInfo();
     }
-  } catch (_) {}
+  } catch (_) {
+    updateInfo = {
+      ...updateInfo,
+      has_update: false,
+      manual_only: true,
+      download_url: '',
+    };
+    applyUpdateInfo();
+  }
 }
 
 async function openUpdateDownload() {
-  if (!updateInfo.download_url) return;
-  await bridgeApi.openExternalUrl(updateInfo.download_url);
+  const target = updateInfo.download_url || updateInfo.release_url;
+  if (!target) return;
+  await bridgeApi.openExternalUrl(target);
 }
 
 function bootstrapApp() {
