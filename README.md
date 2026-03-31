@@ -56,6 +56,16 @@ swift run
 
 See [BUILD.md](BUILD.md) for full build instructions.
 
+## FAQ
+
+### macOS says “CleanMyCodeMac” is damaged and should be moved to Trash
+
+If you downloaded an unsigned build from the browser and macOS blocks it, you can clear the quarantine attribute manually:
+
+```bash
+xattr -cr /Applications/CleanMyCodeMac.app
+```
+
 ## Privacy & Permissions
 
 - All scan and cleanup logic runs locally on your Mac.

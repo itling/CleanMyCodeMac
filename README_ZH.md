@@ -54,6 +54,16 @@ swift run
 
 详细打包说明见 [BUILD_ZH.md](BUILD_ZH.md)。
 
+## 常见问题
+
+### macOS 提示“CleanMyCodeMac”已损坏，无法打开
+
+如果你是从浏览器下载了未签名构建，macOS 可能会拦截。可以先手动清除 quarantine 属性：
+
+```bash
+xattr -cr /Applications/CleanMyCodeMac.app
+```
+
 ## 隐私与权限
 
 - 所有扫描和清理逻辑都在你的 Mac 本地执行。
