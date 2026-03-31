@@ -697,6 +697,10 @@ enum NativeText {
         lang == "zh" ? "\(tool) 模型：\(name)" : "\(tool) model: \(name)"
     }
 
+    static func devCacheDescription(tool: String, pathName: String, lang: String) -> String {
+        lang == "zh" ? "\(tool) 缓存：\(pathName)" : "\(tool) cache: \(pathName)"
+    }
+
     static func trashLabel(volume: String?, lang: String) -> String {
         if let volume, !volume.isEmpty {
             return lang == "zh" ? "外置磁盘废纸篓（\(volume)）" : "External Trash (\(volume))"

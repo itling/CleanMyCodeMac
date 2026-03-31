@@ -114,6 +114,7 @@ let scanSelections = {};
 let currentScanCategories = [];
 let dialogResolver = null;
 let lastKnownLogs = [];
+let latestScanState = null;
 let expandedCategories = new Set(CAT_ORDER);
 let expandedSubGroups = new Set();
 let appMeta = { version: '1.0.0', version_display: 'v1.0.0' };
@@ -318,34 +319,44 @@ async function startScan() {
 
 async function pollProgress() {
   const r = await bridgeApi.getScanProgress();
-  document.getElementById('scan-bar').style.width = r.percent + '%';
-  document.getElementById('scan-pct').textContent = r.percent + '%';
-  // 优先用前端自己的 i18n 翻译，切换语言后立即生效
-  const scanKeys = T('scanKeys') || {};
-  let labelText = r.label;
-  if (r.label_key && scanKeys[r.label_key]) {
-    let tpl = scanKeys[r.label_key];
-    const args = r.label_args || {};
-    Object.keys(args).forEach(k => { tpl = tpl.replace('{' + k + '}', args[k]); });
-    labelText = tpl;
-  }
-  document.getElementById('scan-label').textContent = labelText;
-  lastKnownLogs = r.logs || [];
-  renderScanLog();
+  latestScanState = r;
+  renderScanState();
   document.getElementById('scan-log').scrollTop = document.getElementById('scan-log').scrollHeight;
   if (r.status === 'done') { setTimeout(loadResult, 400); }
   else { setTimeout(pollProgress, 200); }
 }
 
+function formatScanText(key, args, fallback) {
+  const scanKeys = T('scanKeys') || {};
+  let text = key && scanKeys[key] ? scanKeys[key] : (fallback || '');
+  const resolvedArgs = { ...(args || {}) };
+  if (resolvedArgs.category) {
+    resolvedArgs.name = catName(resolvedArgs.category);
+  }
+  Object.keys(resolvedArgs).forEach(k => {
+    text = text.replace('{' + k + '}', resolvedArgs[k]);
+  });
+  return text;
+}
+
+function renderScanState() {
+  if (!latestScanState) return;
+  document.getElementById('scan-bar').style.width = latestScanState.percent + '%';
+  document.getElementById('scan-pct').textContent = latestScanState.percent + '%';
+  document.getElementById('scan-label').textContent = formatScanText(
+    latestScanState.label_key,
+    latestScanState.label_args,
+    latestScanState.label
+  );
+  lastKnownLogs = latestScanState.logs || [];
+  renderScanLog();
+}
+
 function renderScanLog() {
-  const logScanKeys = T('scanKeys') || {};
   const logEl = document.getElementById('scan-log');
   if (!logEl) return;
   logEl.textContent = lastKnownLogs.map(l => {
-    let text = l.key && logScanKeys[l.key] ? logScanKeys[l.key] : (l.key || '');
-    const args = l.args || {};
-    Object.keys(args).forEach(k => { text = text.replace('{' + k + '}', args[k]); });
-    return '\u25b8 ' + text;
+    return '\u25b8 ' + formatScanText(l.key, l.args, l.key || '');
   }).join('\n');
 }
 
@@ -866,7 +877,7 @@ function applyLang() {
   }
   const scanViewVisible = !document.getElementById('view-scan').classList.contains('hidden');
   if (scanViewVisible) {
-    renderScanLog();
+    renderScanState();
   }
   document.getElementById('result-found-label').textContent = T('foundFiles');
   document.getElementById('result-selected-label').textContent = T('selectedJunk');

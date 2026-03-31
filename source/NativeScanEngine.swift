@@ -791,7 +791,7 @@ final class NativeScanEngine: @unchecked Sendable {
             status: "scanning",
             percent: 0,
             label: NativeText.migrationNotice(lang: lang),
-            labelKey: "",
+            labelKey: "ui.init",
             labelArgs: [:],
             logs: []
         )
@@ -956,6 +956,8 @@ final class NativeScanEngine: @unchecked Sendable {
                 updateProgress(
                     percent: Int(Double(completed) / Double(total) * 100),
                     label: NativeText.scanLabel(for: category, lang: lang),
+                    labelKey: progressKey(for: category),
+                    labelArgs: [:],
                     logKey: progressKey(for: category)
                 )
 
@@ -991,6 +993,8 @@ final class NativeScanEngine: @unchecked Sendable {
                 label: supported.contains(category)
                     ? NativeText.scanDone(name: NativeText.categoryName(category, lang: lang), lang: lang)
                     : NativeText.migrationNotice(lang: lang),
+                labelKey: supported.contains(category) ? "scan.done" : "ui.init",
+                labelArgs: supported.contains(category) ? ["category": category] : [:],
                 logKey: nil
             )
         }
@@ -1024,11 +1028,21 @@ final class NativeScanEngine: @unchecked Sendable {
     }
 
     private func updateProgress(percent: Int, label: String, logKey: String?) {
+        updateProgress(percent: percent, label: label, labelKey: "", labelArgs: [:], logKey: logKey)
+    }
+
+    private func updateProgress(
+        percent: Int,
+        label: String,
+        labelKey: String,
+        labelArgs: [String: Any],
+        logKey: String?
+    ) {
         lock.lock()
         progress.percent = percent
         progress.label = label
-        progress.labelKey = ""
-        progress.labelArgs = [:]
+        progress.labelKey = labelKey
+        progress.labelArgs = labelArgs
         if let logKey, !logKey.isEmpty {
             progress.logs = [[
                 "key": logKey,
@@ -1073,12 +1087,71 @@ final class NativeScanEngine: @unchecked Sendable {
         items.first(where: { $0.category == "trash" }) ?? items.first(where: { !$0.isSafe }) ?? items.first
     }
 
+    private func localizedAppName(for item: NativeScanItem, lang: String) -> String {
+        switch item.category {
+        case "download":
+            return NativeText.downloadGroupName(for: item.path.pathExtension.lowercased(), lang: lang)
+        case "document":
+            return NativeText.documentGroupName(for: item.path.pathExtension.lowercased(), lang: lang)
+        case "media":
+            return NativeText.mediaGroupName(for: item.path.pathExtension.lowercased(), lang: lang)
+        case "system_cache", "app_cache":
+            return NativeText.bundleDisplayName(item.path.lastPathComponent)
+        default:
+            return item.appName
+        }
+    }
+
+    private func localizedDescription(for item: NativeScanItem, lang: String) -> String {
+        let dateText = item.lastModified.map(NativeFormat.date)
+
+        switch item.category {
+        case "download":
+            let fallbackDate = dateText ?? NativeFormat.date(Date())
+            return item.isSafe
+                ? NativeText.oldDownloadDescription(date: fallbackDate, lang: lang)
+                : NativeText.downloadDescription(date: fallbackDate, lang: lang)
+        case "large_file":
+            return NativeText.largeFileDescription(name: item.path.lastPathComponent, lang: lang)
+        case "document":
+            return NativeText.documentDescription(
+                name: item.path.lastPathComponent,
+                date: dateText ?? "",
+                lang: lang
+            )
+        case "media":
+            return NativeText.mediaDescription(
+                name: item.path.lastPathComponent,
+                date: dateText ?? "",
+                lang: lang
+            )
+        case "system_cache":
+            return NativeText.systemCacheDescription(bundleID: item.path.lastPathComponent, lang: lang)
+        case "app_cache":
+            return NativeText.appCacheDescription(bundleID: item.path.lastPathComponent, lang: lang)
+        case "log":
+            return NativeText.logDescription(date: dateText ?? "", lang: lang)
+        case "dev_cache":
+            if item.isSafe {
+                return NativeText.devCacheDescription(tool: item.appName, pathName: item.path.lastPathComponent, lang: lang)
+            }
+            return NativeText.aiModelDescription(tool: item.appName, name: item.path.lastPathComponent, lang: lang)
+        case "trash":
+            if item.sizeBytes == 0 {
+                return NativeText.trashNoAccessDescription(lang: lang)
+            }
+            return item.description
+        default:
+            return item.description
+        }
+    }
+
     private func serialize(items: [NativeScanItem], lang: String) -> [String: Any] {
         var categories: [String: Any] = [:]
         let groupedByCategory = Dictionary(grouping: items, by: \.category)
 
         for (category, categoryItems) in groupedByCategory {
-            let groupedByApp = Dictionary(grouping: categoryItems, by: \.appName)
+            let groupedByApp = Dictionary(grouping: categoryItems) { localizedAppName(for: $0, lang: lang) }
             let subGroups: [[String: Any]] = groupedByApp
                 .map { appName, appItems in
                     let groupSize = appItems.reduce(Int64(0)) { $0 + $1.sizeBytes }
@@ -1096,7 +1169,7 @@ final class NativeScanEngine: @unchecked Sendable {
                             "selected": item.selected,
                             "is_safe": item.isSafe,
                             "can_analyze": item.canAnalyze,
-                            "description": item.description,
+                            "description": localizedDescription(for: item, lang: lang),
                         ]
                     }
 
@@ -1147,7 +1220,10 @@ final class NativeScanEngine: @unchecked Sendable {
 
     private func groupDescription(items: [NativeScanItem], lang: String) -> String {
         guard items.count > 1 else {
-            return items.first?.description ?? ""
+            if let item = items.first {
+                return localizedDescription(for: item, lang: lang)
+            }
+            return ""
         }
 
         let dates = items.compactMap(\.lastModified).map(NativeFormat.date).sorted()
