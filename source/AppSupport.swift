@@ -753,6 +753,91 @@ enum NativeText {
         lang == "zh" ? "\(tool) 缓存：\(pathName)" : "\(tool) cache: \(pathName)"
     }
 
+    static func projectArtifactDescription(tool: String, pathName: String, lang: String) -> String {
+        if tool == "Git" {
+            return lang == "zh"
+                ? "Git 子模块元数据：\(pathName)，请确认不再需要这些子模块历史后再清理。"
+                : "Git submodule metadata: \(pathName). Clean only after confirming the submodule history is no longer needed."
+        }
+        return lang == "zh"
+            ? "\(tool) 项目产物：\(pathName)，通常可由依赖安装或构建命令重新生成。"
+            : "\(tool) project artifact: \(pathName). Usually rebuildable from install or build commands."
+    }
+
+    static func gitRepositoriesName(lang: String) -> String {
+        lang == "zh" ? "Git 仓库" : "Git Repositories"
+    }
+
+    static func gitRepositoryDescription(path: String, lang: String) -> String {
+        lang == "zh"
+            ? "Git 仓库占用：\(path)，仅供分析，不会默认清理。"
+            : "Git repository usage: \(path). Analysis only; never selected for cleanup by default."
+    }
+
+    static func dockerDataDescription(lang: String) -> String {
+        lang == "zh"
+            ? "Docker Desktop 数据目录。请用分析面板查看 Docker 可回收空间，不建议直接删除目录。"
+            : "Docker Desktop data directory. Use the analysis panel for reclaimable Docker space; direct directory removal is not recommended."
+    }
+
+    static func dockerAnalysisTitle(lang: String) -> String {
+        lang == "zh" ? "Docker 占用分析" : "Docker Usage Analysis"
+    }
+
+    static func dockerAnalysisHighlights(lang: String) -> [String] {
+        if lang == "zh" {
+            return [
+                "Docker Desktop 会把镜像、容器、volume 和 build cache 放在本地 VM/数据目录里。",
+                "建议优先使用 Docker CLI prune，而不是直接删除 Docker 数据目录。",
+                "不带 --volumes 的 prune 通常更保守；volume 可能包含数据库等持久化数据。",
+            ]
+        }
+        return [
+            "Docker Desktop stores images, containers, volumes, and build cache in its local VM/data directory.",
+            "Prefer Docker CLI prune commands instead of deleting the Docker data directory directly.",
+            "Prune without --volumes is more conservative; volumes may contain persistent database data.",
+        ]
+    }
+
+    static func dockerSuggestedActions(lang: String) -> [[String: String]] {
+        if lang == "zh" {
+            return [
+                [
+                    "label": "保守清理",
+                    "description": "删除未使用镜像、停止的容器、网络和 build cache；不删除 volume。",
+                    "command": "docker system prune -af",
+                ],
+                [
+                    "label": "查看占用",
+                    "description": "先查看 Docker 自己报告的占用和可回收空间。",
+                    "command": "docker system df",
+                ],
+                [
+                    "label": "清理未使用 volume",
+                    "description": "会删除未挂载的数据卷，可能包含旧数据库数据，请确认后再执行。",
+                    "command": "docker volume prune",
+                ],
+            ]
+        }
+        return [
+            [
+                "label": "Conservative prune",
+                "description": "Remove unused images, stopped containers, networks, and build cache; keep volumes.",
+                "command": "docker system prune -af",
+            ],
+            [
+                "label": "Inspect usage",
+                "description": "Show Docker's own usage and reclaimable space report first.",
+                "command": "docker system df",
+            ],
+            [
+                "label": "Prune unused volumes",
+                "description": "Deletes unused volumes and may remove old database data. Confirm first.",
+                "command": "docker volume prune",
+            ],
+        ]
+    }
+
     static func trashLabel(volume: String?, lang: String) -> String {
         if let volume, !volume.isEmpty {
             return lang == "zh" ? "外置磁盘废纸篓（\(volume)）" : "External Trash (\(volume))"

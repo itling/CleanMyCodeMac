@@ -17,5 +17,10 @@ let package = Package(
             name: "CleanMyCodeMac",
             path: "source"
         ),
+        .testTarget(
+            name: "CleanMyCodeMacTests",
+            dependencies: ["CleanMyCodeMac"],
+            path: "Tests/CleanMyCodeMacTests"
+        ),
     ]
 )

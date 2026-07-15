@@ -14,7 +14,14 @@ private struct NativeScanItem {
     var pathString: String { path.path }
     var sizeDisplay: String { NativeFormat.size(sizeBytes) }
     var pathShort: String { NativeFormat.shortPath(path) }
-    var canAnalyze: Bool { category == "large_file" }
+    var canAnalyze: Bool {
+        category == "large_file"
+            || appName == "Docker"
+            || (category == "dev_cache" && NativeFileMetrics.isDirectory(path))
+    }
+    var canClean: Bool {
+        !(category == "dev_cache" && ["Git 仓库", "Git Repositories"].contains(appName))
+    }
 }
 
 private struct NativeScanProgress {
@@ -440,7 +447,7 @@ private enum DevCacheScanner {
         ("Perl", ["~/.cpan/sources", "~/.cpan/build"]),
         ("Lua", ["~/.luarocks"]),
         ("Rust", ["~/.cargo/registry/cache", "~/.cargo/registry/src", "~/.cargo/git/db"]),
-        ("Go", ["~/go/pkg/mod/cache", "~/.cache/go-build"]),
+        ("Go", ["~/go/pkg/mod", "~/.cache/go-build"]),
         ("Java", ["~/.m2/repository", "~/.gradle/caches", "~/.gradle/wrapper/dists"]),
         ("Kotlin", ["~/.kotlin/caches", "~/.konan/cache", "~/.konan/dependencies"]),
         ("Scala", ["~/.sbt/boot", "~/.ivy2/cache", "~/.cache/coursier"]),
@@ -511,6 +518,14 @@ private enum DevCacheScanner {
         "CLion", "PhpStorm", "RubyMine", "Rider", "DataGrip",
         "RustRover", "Aqua", "Fleet", "DataSpell",
     ]
+
+    private struct ProjectArtifact {
+        let url: URL
+        let toolName: String
+        let description: String
+        let isSafe: Bool
+        let selected: Bool
+    }
 
     static func scan(lang: String) -> [NativeScanItem] {
         var items: [NativeScanItem] = []
@@ -657,6 +672,55 @@ private enum DevCacheScanner {
             )
         }
 
+        for repository in GitRepositoryScanner.scan() {
+            items.append(
+                NativeScanItem(
+                    path: repository.url,
+                    sizeBytes: repository.sizeBytes,
+                    category: "dev_cache",
+                    appName: NativeText.gitRepositoriesName(lang: lang),
+                    isSafe: false,
+                    selected: false,
+                    lastModified: NativeFileMetrics.modifiedDate(repository.url),
+                    description: NativeText.gitRepositoryDescription(path: repository.url.path, lang: lang)
+                )
+            )
+        }
+
+        for artifact in discoverProjectArtifacts(lang: lang) {
+            let size = NativeFileMetrics.itemSize(artifact.url)
+            guard size >= 10 * 1024 * 1024 else { continue }
+            addUnique(
+                NativeScanItem(
+                    path: artifact.url,
+                    sizeBytes: size,
+                    category: "dev_cache",
+                    appName: artifact.toolName,
+                    isSafe: artifact.isSafe,
+                    selected: artifact.selected,
+                    lastModified: NativeFileMetrics.modifiedDate(artifact.url),
+                    description: artifact.description
+                )
+            )
+        }
+
+        for dockerURL in dockerDataRoots() {
+            let size = NativeFileMetrics.itemSize(dockerURL)
+            guard size >= 100 * 1024 * 1024 else { continue }
+            addUnique(
+                NativeScanItem(
+                    path: dockerURL,
+                    sizeBytes: size,
+                    category: "dev_cache",
+                    appName: "Docker",
+                    isSafe: false,
+                    selected: false,
+                    lastModified: NativeFileMetrics.modifiedDate(dockerURL),
+                    description: NativeText.dockerDataDescription(lang: lang)
+                )
+            )
+        }
+
         for (toolName, patterns) in aiModelCaches {
             for pattern in patterns {
                 for url in NativePaths.expand(pattern) {
@@ -683,6 +747,115 @@ private enum DevCacheScanner {
         }
 
         return items.sorted { $0.sizeBytes > $1.sizeBytes }
+    }
+
+    private static func dockerDataRoots() -> [URL] {
+        [
+            "~/Library/Containers/com.docker.docker",
+            "~/Library/Group Containers/group.com.docker",
+        ].flatMap(NativePaths.expand)
+    }
+
+    private static func discoverProjectArtifacts(lang: String) -> [ProjectArtifact] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var results: [ProjectArtifact] = []
+        var seen: Set<String> = []
+        scanProjectDirectory(home, depth: 0, maxDepth: 7, results: &results, seen: &seen, lang: lang)
+        return results
+    }
+
+    private static func scanProjectDirectory(
+        _ directory: URL,
+        depth: Int,
+        maxDepth: Int,
+        results: inout [ProjectArtifact],
+        seen: inout Set<String>,
+        lang: String
+    ) {
+        guard depth <= maxDepth else { return }
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        ) else {
+            return
+        }
+
+        for entry in entries {
+            guard NativeFileMetrics.isDirectory(entry) else { continue }
+            let name = entry.lastPathComponent
+            let path = entry.path
+
+            if let artifact = projectArtifact(for: entry, name: name, lang: lang),
+               seen.insert(path).inserted {
+                results.append(artifact)
+                continue
+            }
+
+            if shouldSkipProjectDescendants(name: name, depth: depth) {
+                continue
+            }
+
+            if name == ".git" {
+                let modules = entry.appendingPathComponent("modules")
+                if FileManager.default.fileExists(atPath: modules.path),
+                   seen.insert(modules.path).inserted {
+                    results.append(
+                        ProjectArtifact(
+                            url: modules,
+                            toolName: "Git",
+                            description: NativeText.projectArtifactDescription(tool: "Git", pathName: ".git/modules", lang: lang),
+                            isSafe: false,
+                            selected: false
+                        )
+                    )
+                }
+                continue
+            }
+
+            scanProjectDirectory(entry, depth: depth + 1, maxDepth: maxDepth, results: &results, seen: &seen, lang: lang)
+        }
+    }
+
+    private static func projectArtifact(for url: URL, name: String, lang: String) -> ProjectArtifact? {
+        switch name {
+        case "node_modules":
+            return ProjectArtifact(
+                url: url,
+                toolName: "Node.js",
+                description: NativeText.projectArtifactDescription(tool: "Node.js", pathName: name, lang: lang),
+                isSafe: true,
+                selected: true
+            )
+        case "target":
+            return ProjectArtifact(
+                url: url,
+                toolName: "Rust",
+                description: NativeText.projectArtifactDescription(tool: "Rust", pathName: name, lang: lang),
+                isSafe: true,
+                selected: true
+            )
+        case ".build":
+            return ProjectArtifact(
+                url: url,
+                toolName: "Swift",
+                description: NativeText.projectArtifactDescription(tool: "Swift", pathName: name, lang: lang),
+                isSafe: true,
+                selected: true
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func shouldSkipProjectDescendants(name: String, depth: Int) -> Bool {
+        if ["Library", "Applications", "Downloads", "Movies", "Music", "Pictures", "Desktop", ".Trash"].contains(name) {
+            return true
+        }
+        if name.hasPrefix(".") && name != ".git" {
+            return true
+        }
+        return depth >= 7
     }
 
     private static func discoverPathCaches() -> [(URL, Int64, String)] {
@@ -820,7 +993,7 @@ final class NativeScanEngine: @unchecked Sendable {
 
     func selectPath(_ path: String, selected: Bool) -> [String: Any] {
         mutateSelection { item in
-            if item.pathString == path {
+            if item.pathString == path && item.canClean {
                 item.selected = selected
             }
         }
@@ -829,7 +1002,7 @@ final class NativeScanEngine: @unchecked Sendable {
     func selectCategory(_ category: String, appName: String?, selected: Bool) -> [String: Any] {
         lock.lock()
         let targetPaths = Set(items.compactMap { item -> String? in
-            guard item.category == category else { return nil }
+            guard item.category == category, item.canClean else { return nil }
             if let appName, item.appName != appName {
                 return nil
             }
@@ -847,7 +1020,9 @@ final class NativeScanEngine: @unchecked Sendable {
 
     func selectAll(_ selected: Bool) -> [String: Any] {
         mutateSelection { item in
-            item.selected = selected
+            if item.canClean {
+                item.selected = selected
+            }
         }
     }
 
@@ -870,6 +1045,14 @@ final class NativeScanEngine: @unchecked Sendable {
 
         for (_, candidates) in grouped {
             guard let item = representativeItem(from: candidates) else { continue }
+            if !item.canClean {
+                errors += 1
+                continue
+            }
+            if item.category == "dev_cache" && item.appName == "Docker" {
+                errors += 1
+                continue
+            }
             do {
                 if item.category == "trash" || item.isSafe {
                     try FileManager.default.removeItem(at: item.path)
@@ -900,19 +1083,21 @@ final class NativeScanEngine: @unchecked Sendable {
 
     func analysisPayload(for target: String, lang: String) -> [String: Any] {
         let url = URL(fileURLWithPath: target)
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        let isDirectory = NativeFileMetrics.isDirectory(url)
+        let repositorySize = isDirectory
+            ? GitRepositoryScanner.scan(roots: [url]).first(where: { $0.url.path == url.standardizedFileURL.path })?.sizeBytes
+            : nil
+        let size = repositorySize ?? NativeFileMetrics.itemSize(url)
 
         let siblingRows: [[String: Any]]
         if let siblings = try? FileManager.default.contentsOfDirectory(
             at: url.deletingLastPathComponent(),
-            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) {
             siblingRows = siblings.compactMap { sibling -> [String: Any]? in
                 guard sibling.path != url.path else { return nil }
-                let values = try? sibling.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-                let siblingSize = Int64(values?.fileSize ?? 0)
+                let siblingSize = NativeFileMetrics.itemSize(sibling)
                 guard siblingSize > 0 else { return nil }
                 return [
                     "name": sibling.lastPathComponent,
@@ -934,12 +1119,128 @@ final class NativeScanEngine: @unchecked Sendable {
             siblingRows = []
         }
 
-        return [
+        var payload: [String: Any] = [
             "name": url.lastPathComponent,
             "size_display": NativeFormat.size(size),
             "highlights": NativeText.analysisHighlights(url: url, size: NativeFormat.size(size), lang: lang),
             "same_level_items": siblingRows,
         ]
+
+        if isDirectory, let tree = directoryTreePayload(url: url, size: size, parentSize: size, depth: 0, maxDepth: 1) {
+            payload["tree"] = tree
+        }
+
+        if isDockerDataRoot(url) {
+            payload["special"] = dockerSpecialPayload(lang: lang)
+        }
+
+        return payload
+    }
+
+    private func isDockerDataRoot(_ url: URL) -> Bool {
+        url.path.contains("/Library/Containers/com.docker.docker")
+            || url.path.contains("/Library/Group Containers/group.com.docker")
+    }
+
+    private func directoryTreePayload(url: URL, size: Int64, parentSize: Int64, depth: Int, maxDepth: Int) -> [String: Any]? {
+        guard size > 0 else { return nil }
+        let children: [[String: Any]]
+        if depth < maxDepth,
+           let entries = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+           ) {
+            let childNodes: [[String: Any]] = entries.compactMap { child -> [String: Any]? in
+                let childSize = NativeFileMetrics.itemSize(child)
+                guard childSize > 0 else { return nil }
+                return directoryTreePayload(url: child, size: childSize, parentSize: size, depth: depth + 1, maxDepth: maxDepth)
+            }
+            .sorted { lhs, rhs in
+                (lhs["size"] as? Int64 ?? 0) > (rhs["size"] as? Int64 ?? 0)
+            }
+            .prefix(8)
+            .map { node in
+                var copy = node
+                copy.removeValue(forKey: "size")
+                return copy
+            }
+            children = childNodes
+        } else {
+            children = []
+        }
+
+        return [
+            "name": url.lastPathComponent,
+            "path": url.path,
+            "kind": NativeFileMetrics.isDirectory(url) ? "dir" : "file",
+            "size": size,
+            "size_display": NativeFormat.size(size),
+            "percent": parentSize > 0 ? String(format: "%.1f%%", Double(size) / Double(parentSize) * 100) : "100%",
+            "children": children,
+        ]
+    }
+
+    private func dockerSpecialPayload(lang: String) -> [String: Any] {
+        let dockerLines = runDockerSystemDf()
+        let dockerAvailable = !dockerLines.isEmpty
+        return [
+            "kind": "docker_raw",
+            "title": NativeText.dockerAnalysisTitle(lang: lang),
+            "highlights": NativeText.dockerAnalysisHighlights(lang: lang),
+            "docker_cli_available": dockerAvailable,
+            "docker_df_lines": dockerLines,
+            "docker_summary": dockerSummary(from: dockerLines),
+            "suggestions": NativeText.dockerSuggestedActions(lang: lang),
+        ]
+    }
+
+    private func runDockerSystemDf() -> [String] {
+        let process = Process()
+        if let dockerPath = dockerExecutablePath() {
+            process.launchPath = dockerPath
+            process.arguments = ["system", "df"]
+        } else {
+            process.launchPath = "/usr/bin/env"
+            process.arguments = ["docker", "system", "df"]
+        }
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return [] }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return output
+                .split(separator: "\n")
+                .map { String($0) }
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        } catch {
+            return []
+        }
+    }
+
+    private func dockerExecutablePath() -> String? {
+        [
+            "/opt/homebrew/bin/docker",
+            "/usr/local/bin/docker",
+            "/Applications/Docker.app/Contents/Resources/bin/docker",
+        ].first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func dockerSummary(from lines: [String]) -> [[String: String]] {
+        lines.dropFirst().compactMap { line in
+            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            guard parts.count >= 4 else { return nil }
+            return [
+                "label": parts[0],
+                "value": parts[3],
+            ]
+        }
     }
 
     private func runScan(categories: [String], lang: String) {
@@ -1132,10 +1433,7 @@ final class NativeScanEngine: @unchecked Sendable {
         case "log":
             return NativeText.logDescription(date: dateText ?? "", lang: lang)
         case "dev_cache":
-            if item.isSafe {
-                return NativeText.devCacheDescription(tool: item.appName, pathName: item.path.lastPathComponent, lang: lang)
-            }
-            return NativeText.aiModelDescription(tool: item.appName, name: item.path.lastPathComponent, lang: lang)
+            return item.description
         case "trash":
             if item.sizeBytes == 0 {
                 return NativeText.trashNoAccessDescription(lang: lang)
@@ -1154,13 +1452,14 @@ final class NativeScanEngine: @unchecked Sendable {
             let groupedByApp = Dictionary(grouping: categoryItems) { localizedAppName(for: $0, lang: lang) }
             let subGroups: [[String: Any]] = groupedByApp
                 .map { appName, appItems in
+                    let cleanableItems = appItems.filter(\.canClean)
                     let groupSize = appItems.reduce(Int64(0)) { $0 + $1.sizeBytes }
-                    let selectedSize = appItems.filter(\.selected).reduce(Int64(0)) { $0 + $1.sizeBytes }
-                    let anySelected = appItems.contains(where: \.selected)
-                    let allSelected = !appItems.isEmpty && appItems.allSatisfy(\.selected)
+                    let selectedSize = cleanableItems.filter(\.selected).reduce(Int64(0)) { $0 + $1.sizeBytes }
+                    let anySelected = cleanableItems.contains(where: \.selected)
+                    let allSelected = !cleanableItems.isEmpty && cleanableItems.allSatisfy(\.selected)
                     let allSafe = appItems.allSatisfy(\.isSafe)
                     let description = groupDescription(items: appItems, lang: lang)
-                    let files: [[String: Any]] = appItems.map { item in
+                    let files: [[String: Any]] = appItems.sorted { $0.sizeBytes > $1.sizeBytes }.map { item in
                         [
                             "path": item.pathString,
                             "path_short": item.pathShort,
@@ -1169,6 +1468,7 @@ final class NativeScanEngine: @unchecked Sendable {
                             "selected": item.selected,
                             "is_safe": item.isSafe,
                             "can_analyze": item.canAnalyze,
+                            "can_clean": item.canClean,
                             "description": localizedDescription(for: item, lang: lang),
                         ]
                     }
@@ -1183,6 +1483,7 @@ final class NativeScanEngine: @unchecked Sendable {
                         "is_safe": allSafe,
                         "any_selected": anySelected,
                         "all_selected": allSelected,
+                        "can_clean": !cleanableItems.isEmpty,
                         "file_count": files.count,
                         "primary_path": files.first?["path"] as? String ?? "",
                         "can_analyze": files.count == 1 && (files.first?["can_analyze"] as? Bool == true),
@@ -1191,16 +1492,17 @@ final class NativeScanEngine: @unchecked Sendable {
                 }
                 .sorted { ($0["size"] as? Int64 ?? 0) > ($1["size"] as? Int64 ?? 0) }
 
+            let cleanableCategoryItems = categoryItems.filter(\.canClean)
             let categorySize = categoryItems.reduce(Int64(0)) { $0 + $1.sizeBytes }
-            let categorySelected = categoryItems.filter(\.selected).reduce(Int64(0)) { $0 + $1.sizeBytes }
+            let categorySelected = cleanableCategoryItems.filter(\.selected).reduce(Int64(0)) { $0 + $1.sizeBytes }
             categories[category] = [
                 "name": NativeText.categoryName(category, lang: lang),
                 "size": categorySize,
                 "size_display": NativeFormat.size(categorySize),
                 "selected_size": categorySelected,
                 "selected_display": NativeFormat.size(categorySelected),
-                "any_selected": categoryItems.contains(where: \.selected),
-                "all_selected": !categoryItems.isEmpty && categoryItems.allSatisfy(\.selected),
+                "any_selected": cleanableCategoryItems.contains(where: \.selected),
+                "all_selected": !cleanableCategoryItems.isEmpty && cleanableCategoryItems.allSatisfy(\.selected),
                 "sub_groups": subGroups,
             ]
         }
