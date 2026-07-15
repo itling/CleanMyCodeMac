@@ -42,6 +42,7 @@ SWIFT_BUILD_HOME="${SWIFT_BUILD_HOME:-$BUILD_ROOT/swift-home}"
 SWIFT_CLANG_MODULE_CACHE_PATH="${SWIFT_CLANG_MODULE_CACHE_PATH:-$BUILD_ROOT/clang-module-cache}"
 ICON_PATH="$PROJECT_DIR/resources/app.icns"
 UI_DIR="$PROJECT_DIR/resources/ui"
+DMG_BACKGROUND_GENERATOR="$PROJECT_DIR/scripts/generate_dmg_background.swift"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -129,6 +130,92 @@ create_info_plist() {
 EOF
 }
 
+create_dmg_background() {
+  local output_path="$1"
+  env \
+    HOME="$SWIFT_BUILD_HOME" \
+    CLANG_MODULE_CACHE_PATH="$SWIFT_CLANG_MODULE_CACHE_PATH" \
+    "$SWIFT_BIN" "$DMG_BACKGROUND_GENERATOR" "$output_path"
+}
+
+configure_dmg_window() {
+  local volume_name="$1"
+
+  osascript - "$volume_name" "$APP_NAME" <<'APPLESCRIPT'
+on run argv
+  set volumeName to item 1 of argv
+  set appName to item 2 of argv
+
+  tell application "Finder"
+    tell disk volumeName
+      open
+      set current view of container window to icon view
+      set toolbar visible of container window to false
+      set statusbar visible of container window to false
+      set bounds of container window to {100, 100, 760, 560}
+
+      set viewOptions to icon view options of container window
+      set arrangement of viewOptions to not arranged
+      set icon size of viewOptions to 112
+      set text size of viewOptions to 14
+      set background picture of viewOptions to file ".background:background.png"
+
+      set position of item (appName & ".app") of container window to {160, 230}
+      set position of item "Applications" of container window to {500, 230}
+
+      update without registering applications
+      delay 2
+      close container window
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
+create_styled_dmg() {
+  local arch="$1"
+  local staging_dir="$2"
+  local dmg_path="$3"
+  local volume_name="$APP_NAME $arch"
+  local rw_dmg_path="$BUILD_ROOT/${APP_NAME}-${arch}-rw.dmg"
+  local attach_output=""
+  local device=""
+  local mount_point=""
+
+  rm -f "$rw_dmg_path" "$dmg_path"
+  hdiutil create \
+    -volname "$volume_name" \
+    -srcfolder "$staging_dir" \
+    -fs HFS+ \
+    -format UDRW \
+    -ov \
+    "$rw_dmg_path"
+
+  attach_output="$(hdiutil attach "$rw_dmg_path" -readwrite -noverify -noautoopen)"
+  device="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ { print $1; exit }')"
+  mount_point="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ { sub(/^.*Apple_HFS[[:space:]]+/, ""); print; exit }')"
+
+  if [[ -z "$device" || -z "$mount_point" ]]; then
+    echo "Unable to mount writable DMG."
+    printf '%s\n' "$attach_output"
+    exit 1
+  fi
+
+  if ! configure_dmg_window "$(basename "$mount_point")"; then
+    hdiutil detach "$device" -force || true
+    exit 1
+  fi
+
+  sync
+  hdiutil detach "$device"
+  hdiutil convert "$rw_dmg_path" \
+    -format UDZO \
+    -imagekey zlib-level=9 \
+    -ov \
+    -o "$dmg_path"
+  rm -f "$rw_dmg_path"
+}
+
 build_one_arch() {
   local arch="$1"
   local scratch_dir="$BUILD_ROOT/swift-$arch"
@@ -182,14 +269,11 @@ build_one_arch() {
   mkdir -p "$dmg_staging_dir"
   cp -R "$app_bundle" "$dmg_staging_dir/"
   ln -sfn /Applications "$dmg_staging_dir/Applications"
+  mkdir -p "$dmg_staging_dir/.background"
+  create_dmg_background "$dmg_staging_dir/.background/background.png"
 
   echo "Creating .dmg ($arch)..."
-  hdiutil create \
-    -volname "$APP_NAME $arch" \
-    -srcfolder "$dmg_staging_dir" \
-    -ov \
-    -format UDZO \
-    "$dmg_path"
+  create_styled_dmg "$arch" "$dmg_staging_dir" "$dmg_path"
 
   echo "Build complete ($arch):"
   echo "APP: $app_bundle"
@@ -203,6 +287,12 @@ fi
 
 require_cmd hdiutil
 require_cmd xattr
+require_cmd osascript
+
+if [[ ! -f "$DMG_BACKGROUND_GENERATOR" ]]; then
+  echo "DMG background generator not found: $DMG_BACKGROUND_GENERATOR"
+  exit 1
+fi
 
 clean_legacy_dist_artifacts
 
