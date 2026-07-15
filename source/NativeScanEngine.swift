@@ -438,7 +438,7 @@ private enum LogsScanner {
     }
 }
 
-private enum DevCacheScanner {
+enum DevCacheScanner {
     private static let languageCaches: [(String, [String])] = [
         ("Node.js", ["~/.npm/_cacache", "~/.yarn/cache", "~/.pnpm-store", "~/.bun/install/cache", "~/.nvm/.cache", "~/.volta/cache"]),
         ("Python", ["~/Library/Caches/pip", "~/.cache/pip", "~/.conda/pkgs", "~/.pyenv/cache", "~/Library/Caches/pypoetry"]),
@@ -519,7 +519,7 @@ private enum DevCacheScanner {
         "RustRover", "Aqua", "Fleet", "DataSpell",
     ]
 
-    private struct ProjectArtifact {
+    struct ProjectArtifact {
         let url: URL
         let toolName: String
         let description: String
@@ -527,7 +527,7 @@ private enum DevCacheScanner {
         let selected: Bool
     }
 
-    static func scan(lang: String) -> [NativeScanItem] {
+    fileprivate static func scan(lang: String) -> [NativeScanItem] {
         var items: [NativeScanItem] = []
         var seenPaths: Set<String> = []
 
@@ -756,11 +756,13 @@ private enum DevCacheScanner {
         ].flatMap(NativePaths.expand)
     }
 
-    private static func discoverProjectArtifacts(lang: String) -> [ProjectArtifact] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+    static func discoverProjectArtifacts(
+        in root: URL = FileManager.default.homeDirectoryForCurrentUser,
+        lang: String
+    ) -> [ProjectArtifact] {
         var results: [ProjectArtifact] = []
         var seen: Set<String> = []
-        scanProjectDirectory(home, depth: 0, maxDepth: 7, results: &results, seen: &seen, lang: lang)
+        scanProjectDirectory(root, depth: 0, maxDepth: 7, results: &results, seen: &seen, lang: lang)
         return results
     }
 
@@ -793,23 +795,6 @@ private enum DevCacheScanner {
             }
 
             if shouldSkipProjectDescendants(name: name, depth: depth) {
-                continue
-            }
-
-            if name == ".git" {
-                let modules = entry.appendingPathComponent("modules")
-                if FileManager.default.fileExists(atPath: modules.path),
-                   seen.insert(modules.path).inserted {
-                    results.append(
-                        ProjectArtifact(
-                            url: modules,
-                            toolName: "Git",
-                            description: NativeText.projectArtifactDescription(tool: "Git", pathName: ".git/modules", lang: lang),
-                            isSafe: false,
-                            selected: false
-                        )
-                    )
-                }
                 continue
             }
 
@@ -852,7 +837,7 @@ private enum DevCacheScanner {
         if ["Library", "Applications", "Downloads", "Movies", "Music", "Pictures", "Desktop", ".Trash"].contains(name) {
             return true
         }
-        if name.hasPrefix(".") && name != ".git" {
+        if name.hasPrefix(".") {
             return true
         }
         return depth >= 7
@@ -1196,40 +1181,16 @@ final class NativeScanEngine: @unchecked Sendable {
     }
 
     private func runDockerSystemDf() -> [String] {
-        let process = Process()
-        if let dockerPath = dockerExecutablePath() {
-            process.launchPath = dockerPath
-            process.arguments = ["system", "df"]
-        } else {
-            process.launchPath = "/usr/bin/env"
-            process.arguments = ["docker", "system", "df"]
-        }
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return [] }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return output
-                .split(separator: "\n")
-                .map { String($0) }
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        } catch {
+        let result = DockerCommandRunner.run(actionID: "system_df")
+        guard result["success"] as? Bool == true,
+              let output = result["output"] as? String
+        else {
             return []
         }
-    }
-
-    private func dockerExecutablePath() -> String? {
-        [
-            "/opt/homebrew/bin/docker",
-            "/usr/local/bin/docker",
-            "/Applications/Docker.app/Contents/Resources/bin/docker",
-        ].first { FileManager.default.isExecutableFile(atPath: $0) }
+        return output
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private func dockerSummary(from lines: [String]) -> [[String: String]] {

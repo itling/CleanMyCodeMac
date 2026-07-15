@@ -62,6 +62,25 @@ struct GitRepositoryScannerTests {
         #expect(repositories.map(\.url.lastPathComponent) == ["archive.git"])
     }
 
+    @Test("project artifact scan excludes Git metadata already covered by repository usage")
+    func projectArtifactsExcludeGitMetadata() throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let project = temporaryDirectory.appendingPathComponent("project")
+        try FileManager.default.createDirectory(
+            at: project.appendingPathComponent(".git/modules/dependency"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: project.appendingPathComponent("node_modules"),
+            withIntermediateDirectories: true
+        )
+
+        let artifacts = DevCacheScanner.discoverProjectArtifacts(in: temporaryDirectory, lang: "en")
+
+        #expect(artifacts.map(\.url.lastPathComponent) == ["node_modules"])
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

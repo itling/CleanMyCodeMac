@@ -10,6 +10,15 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         self.webView = webView
     }
 
+    static func requiresBackgroundExecution(method: String) -> Bool {
+        switch method {
+        case "analyze_target", "clean_paths", "run_docker_command":
+            return true
+        default:
+            return false
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == BridgeKeys.messageHandler,
               let body = message.body as? [String: Any],
@@ -34,7 +43,41 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func handleAsync(method: String, args: [Any], id: Int) -> Bool {
+        guard Self.requiresBackgroundExecution(method: method) || method == "check_for_updates" else {
+            return false
+        }
+
         switch method {
+        case "analyze_target":
+            guard let target = args.first as? String, !target.isEmpty else {
+                resolve(id: id, payload: ["error": "Missing path."])
+                return true
+            }
+            let lang = LanguageStore.current()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                self.resolve(id: id, payload: self.scanEngine.analysisPayload(for: target, lang: lang))
+            }
+            return true
+        case "clean_paths":
+            let paths = args.first as? [String] ?? []
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                self.resolve(id: id, payload: self.scanEngine.cleanPaths(paths))
+            }
+            return true
+        case "run_docker_command":
+            guard let actionID = args.first as? String else {
+                resolve(id: id, payload: ["success": false, "error": "Missing Docker action."])
+                return true
+            }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let payload = DockerCommandRunner.run(actionID: actionID)
+                DispatchQueue.main.async {
+                    self?.resolve(id: id, payload: payload)
+                }
+            }
+            return true
         case "check_for_updates":
             UpdateService.checkForUpdates { [weak self] result in
                 let resolvedPayload: [String: Any]?
@@ -126,14 +169,6 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case "select_all":
             let selected = args.first as? Bool ?? true
             return scanEngine.selectAll(selected)
-        case "clean_paths":
-            let paths = args.first as? [String] ?? []
-            return scanEngine.cleanPaths(paths)
-        case "analyze_target":
-            guard let target = args.first as? String, !target.isEmpty else {
-                return ["error": "Missing path."]
-            }
-            return scanEngine.analysisPayload(for: target, lang: lang)
         default:
             throw NSError(
                 domain: "CleanMyCodeMac",

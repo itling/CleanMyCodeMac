@@ -10,7 +10,7 @@ const UI = {
     scanKeys: {'ui.init':'初始化中...','scan.system_cache':'正在扫描系统缓存...','scan.app_cache':'正在扫描应用缓存...','scan.log':'正在扫描日志文件...','scan.download':'正在分析下载文件夹...','scan.large_file':'正在搜索大文件...','scan.trash':'正在检查废纸篓...','scan.dev_cache':'正在扫描编程工具与语言缓存...','scan.ai_models':'正在扫描大模型文件...','scan.document':'正在扫描文档文件...','scan.media':'正在扫描媒体文件...','scan.done':'已完成：{name}','scan.error':'{name} 扫描出错'},
     foundFiles: '共发现可清理文件', selectedJunk: '已选择垃圾',
     back: '返回', selectResult: '全选结果', deselectResult: '取消全选', cleanNow: '立即清理',
-    cleaning: '清理中...', cleanDone: '清理完成', cleanFreed: '清理完成，释放了 {size}',
+    cleaning: '清理中...', cleanDone: '清理完成', cleanFreed: '清理完成，释放了 {size}', cleanError: '清理失败，请稍后重试。',
     cleanFailed: '{n} 个项目失败',
     permOk: '&#10003; 完全磁盘访问已授权', permWarn: '&#9888; 未授权完全磁盘访问',
     permTrashWarn: '废纸篓访问未授权', permPartialWarn: '部分受保护目录未授权',
@@ -19,9 +19,13 @@ const UI = {
     badgeClean: '很干净', badgeSafe: '建议清理', badgeWarn: '谨慎清理',
     expandFiles: '展开文件列表', open: '打开', analyze: '分析',
     catTotal: '共 {size}，已选择', analysisTitle: '占用分析', analyzing: '正在分析，请稍候...',
-    analysisConclusion: '分析结论', sameLevelUsage: '同级目录占用', treeView: '树状占用视图',
+    analysisConclusion: '分析结论', sameLevelUsage: '同级目录占用', treeView: '树状占用视图', analyzingShort: '分析中...', analysisFailed: '分析失败，请稍后重试。',
     upperDir: '上层目录：', dirType: '目录', fileType: '文件', percent: '占比',
     finder: 'Finder', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
+    runCmd: '执行命令', runningCmd: '执行中...', commandDone: '命令执行完成', commandFailed: '命令执行失败',
+    commandNoOutput: '命令执行完成，没有输出。',
+    confirmSystemPrune: '将删除所有未使用镜像、停止的容器、网络和 build cache。此操作不可撤销，但不会删除 volume。确认执行？',
+    confirmVolumePrune: '将删除所有未挂载的 Docker volume，可能包含旧数据库等持久化数据。此操作不可撤销，确认执行？',
     copyFail: '复制失败，请手动复制命令', copyFailTitle: '复制失败',
     noAnalysis: '没有可展示的分析数据。', suggestedActions: '建议动作',
     dockerNoResult: '未获取到 Docker CLI 结果，可能是 Docker 未启动或命令不可用。',
@@ -55,7 +59,7 @@ const UI = {
     scanKeys: {'ui.init':'Initializing...','scan.system_cache':'Scanning system cache...','scan.app_cache':'Scanning app cache...','scan.log':'Scanning log files...','scan.download':'Analyzing downloads folder...','scan.large_file':'Searching large files...','scan.trash':'Checking trash...','scan.dev_cache':'Scanning dev tools & language caches...','scan.ai_models':'Scanning AI model files...','scan.document':'Scanning document files...','scan.media':'Scanning media files...','scan.done':'Done: {name}','scan.error':'{name} scan error'},
     foundFiles: 'Cleanable files found', selectedJunk: 'Selected',
     back: 'Back', selectResult: 'Select All', deselectResult: 'Deselect All', cleanNow: 'Clean Now',
-    cleaning: 'Cleaning...', cleanDone: 'Clean Complete', cleanFreed: 'Cleaned, freed {size}',
+    cleaning: 'Cleaning...', cleanDone: 'Clean Complete', cleanFreed: 'Cleaned, freed {size}', cleanError: 'Clean failed. Please try again.',
     cleanFailed: '{n} items failed',
     permOk: '&#10003; Full Disk Access granted', permWarn: '&#9888; Full Disk Access not granted',
     permTrashWarn: 'Trash access not granted', permPartialWarn: 'Protected folders partially not granted',
@@ -64,9 +68,13 @@ const UI = {
     badgeClean: 'Clean', badgeSafe: 'Safe to clean', badgeWarn: 'Use caution',
     expandFiles: 'Expand file list', open: 'Open', analyze: 'Analyze',
     catTotal: 'Total {size}, selected', analysisTitle: 'Usage Analysis', analyzing: 'Analyzing, please wait...',
-    analysisConclusion: 'Analysis', sameLevelUsage: 'Same-level Usage', treeView: 'Tree View',
+    analysisConclusion: 'Analysis', sameLevelUsage: 'Same-level Usage', treeView: 'Tree View', analyzingShort: 'Analyzing...', analysisFailed: 'Analysis failed. Please try again.',
     upperDir: 'Parent dir: ', dirType: 'Directory', fileType: 'File', percent: 'Ratio',
     finder: 'Finder', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
+    runCmd: 'Run Command', runningCmd: 'Running...', commandDone: 'Command Completed', commandFailed: 'Command Failed',
+    commandNoOutput: 'Command completed without output.',
+    confirmSystemPrune: 'This removes all unused images, stopped containers, networks, and build cache. It cannot be undone, but volumes are kept. Run it now?',
+    confirmVolumePrune: 'This removes all unused Docker volumes, which may contain persistent database data. It cannot be undone. Run it now?',
     copyFail: 'Copy failed, please copy manually', copyFailTitle: 'Copy Failed',
     noAnalysis: 'No analysis data available.', suggestedActions: 'Suggested Actions',
     dockerNoResult: 'Docker CLI result not available. Docker may not be running.',
@@ -132,6 +140,10 @@ let updateInfo = {
 };
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
+
+function waitForNextPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
 
 function ensureBridgeObject() {
   if (bridgeObjectPromise) return bridgeObjectPromise;
@@ -199,6 +211,7 @@ const bridgeApi = {
   selectAll(selected) { return callBridge('select_all', selected); },
   cleanPaths(paths) { return callBridge('clean_paths', paths); },
   analyzeTarget(path) { return callBridge('analyze_target', path); },
+  runDockerCommand(actionID) { return callBridge('run_docker_command', actionID); },
   revealPath(path) { return callBridge('reveal_path', path); },
   getLanguage() { return callBridge('get_language'); },
   getAppMeta() { return callBridge('get_app_meta'); },
@@ -520,7 +533,7 @@ function renderResult() {
             if (btn.dataset.action === 'reveal') {
               await bridgeApi.revealPath(targetPath);
             } else if (btn.dataset.action === 'analyze') {
-              await openAnalysis(targetPath);
+              await openAnalysis(targetPath, btn);
             }
           });
         });
@@ -582,28 +595,56 @@ async function doClean() {
   const btn = document.getElementById('btn-clean');
   btn.disabled = true;
   btn.textContent = T('cleaning');
+  btn.classList.add('is-busy');
+  btn.setAttribute('aria-busy', 'true');
+  await waitForNextPaint();
 
-  const r = await bridgeApi.cleanPaths(uniquePaths);
-
-  let msg = T('cleanFreed').replace('{size}', r.freed);
-  if (r.errors > 0) msg += '\n\n' + T('cleanFailed').replace('{n}', r.errors);
-  showToast(msg, T('cleanDone'), 'success');
-  btn.disabled = false;
-  btn.textContent = T('cleanNow');
+  try {
+    const r = await bridgeApi.cleanPaths(uniquePaths);
+    let msg = T('cleanFreed').replace('{size}', r.freed);
+    if (r.errors > 0) msg += '\n\n' + T('cleanFailed').replace('{n}', r.errors);
+    showToast(msg, T('cleanDone'), 'success');
+  } catch (error) {
+    showToast(error && error.message ? error.message : T('cleanError'), T('cleanError'), 'error');
+    return;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = T('cleanNow');
+    btn.classList.remove('is-busy');
+    btn.removeAttribute('aria-busy');
+  }
   await new Promise(resolve => setTimeout(resolve, 600));
   await loadDisk();
   startScan();
 }
 
-async function openAnalysis(path) {
+async function openAnalysis(path, triggerButton) {
   const mask = document.getElementById('analysis-mask');
   const title = document.getElementById('analysis-title');
   const body = document.getElementById('analysis-body');
   title.textContent = T('analysisTitle');
-  body.innerHTML = '<div class="analysis-note">' + T('analyzing') + '</div>';
+  body.innerHTML = '<div class="analysis-loading" role="status"><span class="inline-spinner" aria-hidden="true"></span><span>' + T('analyzing') + '</span></div>';
+  body.setAttribute('aria-busy', 'true');
   mask.classList.add('show');
+  if (triggerButton) {
+    triggerButton.disabled = true;
+    triggerButton.textContent = T('analyzingShort');
+  }
+  await waitForNextPaint();
 
-  const data = await bridgeApi.analyzeTarget(path);
+  let data;
+  try {
+    data = await bridgeApi.analyzeTarget(path);
+  } catch (error) {
+    body.innerHTML = '<div class="analysis-note">' + escapeHtml(error && error.message ? error.message : T('analysisFailed')) + '</div>';
+    return;
+  } finally {
+    body.removeAttribute('aria-busy');
+    if (triggerButton) {
+      triggerButton.disabled = false;
+      triggerButton.textContent = T('analyze');
+    }
+  }
   if (data.error) {
     title.textContent = T('analysisTitle');
     body.innerHTML = '<div class="analysis-note">' + escapeHtml(data.error) + '</div>';
@@ -655,7 +696,10 @@ async function openAnalysis(path) {
               '<div class="analysis-cmd-code">' + escapeHtml(item.command) + '</div>' +
               '<div class="analysis-cmd-actions">' +
                 '<button class="btn-mini" data-copy="' + escapeHtml(item.command) + '">' + T('copyCmd') + '</button>' +
+                '<button class="btn-mini btn-run-command" data-run-docker="' + escapeHtml(item.action_id) + '"' +
+                  (item.requires_confirmation ? ' data-requires-confirmation="1"' : '') + '>' + T('runCmd') + '</button>' +
               '</div>' +
+              '<div class="analysis-cmd-output hidden" role="status" aria-live="polite"></div>' +
             '</div>'
           ).join('') +
           '</div>'
@@ -744,6 +788,46 @@ function bindAnalysisActions() {
         setTimeout(() => { btn.textContent = T('copyCmd'); }, 1200);
       } catch (_) {
         showAlert(T('copyFail'), T('copyFailTitle'));
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-run-docker]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const actionID = btn.dataset.runDocker;
+      if (!actionID) return;
+
+      if (btn.dataset.requiresConfirmation === '1') {
+        const message = actionID === 'volume_prune' ? T('confirmVolumePrune') : T('confirmSystemPrune');
+        if (!await showConfirm(message, T('confirm'))) return;
+      }
+
+      const output = btn.closest('.analysis-cmd').querySelector('.analysis-cmd-output');
+      btn.disabled = true;
+      btn.textContent = T('runningCmd');
+      output.classList.add('hidden');
+      output.classList.remove('error');
+
+      try {
+        const result = await bridgeApi.runDockerCommand(actionID);
+        const succeeded = Boolean(result && result.success);
+        output.textContent = (result && (result.output || result.error)) || T('commandNoOutput');
+        output.classList.toggle('error', !succeeded);
+        output.classList.remove('hidden');
+        showToast(
+          succeeded ? T('commandDone') : T('commandFailed'),
+          succeeded ? T('commandDone') : T('commandFailed'),
+          succeeded ? 'success' : 'error'
+        );
+        if (succeeded) await loadDisk();
+      } catch (error) {
+        output.textContent = error && error.message ? error.message : T('commandFailed');
+        output.classList.add('error');
+        output.classList.remove('hidden');
+        showToast(T('commandFailed'), T('commandFailed'), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = T('runCmd');
       }
     });
   });
