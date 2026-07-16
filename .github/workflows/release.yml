@@ -13,6 +13,7 @@ jobs:
   build-dmg:
     name: Build DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    environment: prod
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +35,22 @@ jobs:
       - name: Make scripts executable
         run: chmod +x build_dmg.sh build_icon.sh sign_and_notarize.sh
 
+      - name: Validate Sparkle signing configuration
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          required=(
+            SPARKLE_PUBLIC_KEY
+            SPARKLE_PRIVATE_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required release secret: $name"
+              exit 1
+            fi
+          done
+
       - name: Ensure app icon
         run: |
           if [[ -f "resources/app.icns" ]]; then
@@ -46,6 +63,7 @@ jobs:
       - name: Build DMG
         env:
           APP_VERSION: ${{ github.ref_name }}
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
         run: ./build_dmg.sh ${{ matrix.arch }}
 
       - name: Import Developer ID certificate
@@ -55,7 +73,7 @@ jobs:
           DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
         run: |
           if [[ -z "${APPLE_CERTIFICATE_P12:-}" || -z "${APPLE_CERTIFICATE_PASSWORD:-}" || -z "${DEVELOPER_ID_APP:-}" ]]; then
-            echo "Signing certificate secrets are not fully configured; skipping certificate import."
+            echo "Developer ID certificate is not fully configured; using ad-hoc signing."
             exit 0
           fi
 
@@ -84,18 +102,47 @@ jobs:
           TEAM_ID: ${{ secrets.TEAM_ID }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
         run: |
-          if [[ -z "${DEVELOPER_ID_APP:-}" ]]; then
-            echo "DEVELOPER_ID_APP is not configured; publishing unsigned DMG."
-            exit 0
+          ./sign_and_notarize.sh
+
+      - name: Generate signed Sparkle appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          TOOL="$(find "${{ github.workspace }}/build/swift-${{ matrix.arch }}/artifacts" -path '*/bin/generate_appcast' -type f | head -n 1)"
+          if [[ -z "$TOOL" ]]; then
+            echo "Sparkle generate_appcast tool was not found."
+            exit 1
           fi
 
-          ./sign_and_notarize.sh
+          UPDATES_DIR="$RUNNER_TEMP/updates-${{ matrix.arch }}"
+          mkdir -p "$UPDATES_DIR"
+          cp "${{ github.workspace }}/dist/CleanMyCodeMac-${{ matrix.arch }}.dmg" "$UPDATES_DIR/"
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$TOOL" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            --link "https://github.com/${{ github.repository }}" \
+            -o "$UPDATES_DIR/appcast-${{ matrix.arch }}.xml" \
+            "$UPDATES_DIR"
+
+          if ! grep -q 'sparkle:edSignature=' "$UPDATES_DIR/appcast-${{ matrix.arch }}.xml"; then
+            echo "Generated appcast is missing an EdDSA signature. Check the Sparkle key pair."
+            exit 1
+          fi
+          if ! grep -q 'CleanMyCodeMac-${{ matrix.arch }}.dmg' "$UPDATES_DIR/appcast-${{ matrix.arch }}.xml"; then
+            echo "Generated appcast does not reference the ${{ matrix.arch }} update archive."
+            exit 1
+          fi
+
+          cp "$UPDATES_DIR/appcast-${{ matrix.arch }}.xml" "${{ github.workspace }}/dist/"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v6
         with:
           name: dmg-${{ matrix.arch }}
-          path: dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
+          path: |
+            dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
+            dist/appcast-${{ matrix.arch }}.xml
           if-no-files-found: error
 
   publish-release:
@@ -114,5 +161,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.dmg
+          files: |
+            dist/*.dmg
+            dist/*.xml
           generate_release_notes: true

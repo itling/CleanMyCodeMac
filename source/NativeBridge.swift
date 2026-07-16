@@ -5,9 +5,11 @@ import WebKit
 final class NativeBridge: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private let scanEngine = NativeScanEngine()
+    private let updateCoordinator: UpdateCoordinator
 
-    init(webView: WKWebView) {
+    init(webView: WKWebView, updateCoordinator: UpdateCoordinator) {
         self.webView = webView
+        self.updateCoordinator = updateCoordinator
     }
 
     static func requiresBackgroundExecution(method: String) -> Bool {
@@ -79,25 +81,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             }
             return true
         case "check_for_updates":
-            UpdateService.checkForUpdates { [weak self] result in
-                let resolvedPayload: [String: Any]?
-                let message: String?
-                switch result {
-                case .success(let updatePayload):
-                    resolvedPayload = updatePayload.dictionary()
-                    message = nil
-                case .failure(let error):
-                    resolvedPayload = nil
-                    message = error.localizedDescription
-                }
-
-                DispatchQueue.main.async {
-                    if let resolvedPayload {
-                        self?.resolve(id: id, payload: resolvedPayload)
-                    } else {
-                        self?.reject(id: id, message: message ?? "Unknown update error.")
-                    }
-                }
+            updateCoordinator.checkAvailability { [weak self] payload in
+                self?.resolve(id: id, payload: payload)
             }
             return true
         default:
@@ -119,15 +104,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             return LanguageStore.payload()
         case "get_app_meta":
             return AppMetadata.payload()
-        case "open_external_url":
-            guard let rawURL = args.first as? String,
-                  let url = URL(string: rawURL),
-                  !rawURL.isEmpty
-            else {
-                return ["ok": false, "error": "Missing URL."]
-            }
-            NSWorkspace.shared.open(url)
-            return ["ok": true]
+        case "install_update":
+            return ["ok": updateCoordinator.presentAvailableUpdate()]
         case "set_language":
             if let lang = args.first as? String {
                 LanguageStore.set(lang)

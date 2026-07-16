@@ -12,10 +12,22 @@ let package = Package(
             targets: ["CleanMyCodeMac"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.4"),
+    ],
     targets: [
         .executableTarget(
             name: "CleanMyCodeMac",
-            path: "source"
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            path: "source",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@loader_path/../Frameworks",
+                ]),
+            ]
         ),
         .testTarget(
             name: "CleanMyCodeMacTests",

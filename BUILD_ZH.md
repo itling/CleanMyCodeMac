@@ -49,6 +49,14 @@ APP_VERSION=1.2.3 ./build_dmg.sh
 APP_VERSION=1.2.3
 ```
 
+如需在本地构建中启用应用内更新，还需传入 Sparkle 公钥：
+
+```bash
+SPARKLE_PUBLIC_KEY="你的 EdDSA 公钥" APP_VERSION=1.2.3 ./build_dmg.sh
+```
+
+未提供公钥时应用仍可正常运行，但不会检查或安装更新。
+
 ## 应用图标
 
 如果你更新了 `resources/app_icon.png`，可以先重新生成 `.icns`：
@@ -94,10 +102,17 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 
 - 推送 tag，例如 `v1.0.0`
 - `release.yml` 会分别构建 `arm64` 和 `x86_64` 的 DMG
-- 如果配置了签名相关 secrets，就会自动签名，并在配置完整时继续做 notarization
-- 最终生成的 DMG 会自动上传到对应的 GitHub Release
+- 未配置 Apple Developer 时，workflow 会做临时签名并跳过公证
+- Apple 签名信息完整时，workflow 会使用 Developer ID 签名并公证应用和 DMG
+- Sparkle 会分别生成 `appcast-arm64.xml` 和 `appcast-x86_64.xml`
+- DMG 与 appcast 会一起上传到对应的 GitHub Release
 
-建议在 GitHub 仓库里配置这些 secrets：
+应用内更新必须配置：
+
+- `SPARKLE_PUBLIC_KEY`（Sparkle EdDSA 公钥）
+- `SPARKLE_PRIVATE_KEY`（与公钥配对的 Sparkle EdDSA 私钥）
+
+Apple Developer 签名与公证为可选增强配置：
 
 - `DEVELOPER_ID_APP`
 - `APPLE_CERTIFICATE_P12`（base64 编码后的 `.p12` 证书）
@@ -106,4 +121,13 @@ APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
 - `TEAM_ID`
 - `APP_PASSWORD`
 
-如果这些 secrets 没有配置，workflow 仍然会发布未签名的 DMG。
+可以用 SwiftPM 下载的 Sparkle 工具生成密钥：
+
+```bash
+swift package resolve
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac -p
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac -x sparkle-private.key
+```
+
+第二条命令输出公钥；导出的私钥内容写入 GitHub Secret 后，应立即安全删除本地导出文件。Release workflow 仅在缺少 Sparkle 密钥时失败；缺少 Apple 配置时仍会发布，但安装包不会经过 Apple 公证。

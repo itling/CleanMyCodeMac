@@ -51,6 +51,14 @@ If `APP_VERSION` is not set, the build script also falls back to `.env` in the p
 APP_VERSION=1.2.3
 ```
 
+To enable in-app updates in a local package, also provide the Sparkle public key:
+
+```bash
+SPARKLE_PUBLIC_KEY="your EdDSA public key" APP_VERSION=1.2.3 ./build_dmg.sh
+```
+
+The app still runs without this key, but update checks and installation are disabled.
+
 ## App Icon
 
 If you update `resources/app_icon.png`, regenerate the `.icns` first:
@@ -96,10 +104,17 @@ This repository can publish DMG files automatically through GitHub Actions.
 
 - Push a tag such as `v1.0.0`
 - The `release.yml` workflow builds DMG files for `arm64` and `x86_64`
-- If signing secrets are configured, the workflow signs and optionally notarizes the build
-- The generated DMG files are uploaded to the matching GitHub Release
+- Without Apple Developer credentials, the workflow applies an ad-hoc signature and skips notarization
+- With complete Apple credentials, the workflow signs and notarizes the app and DMG with Developer ID
+- Sparkle generates separate `appcast-arm64.xml` and `appcast-x86_64.xml` feeds
+- The DMG and appcast files are uploaded to the matching GitHub Release
 
-Recommended GitHub secrets:
+Required for in-app updates:
+
+- `SPARKLE_PUBLIC_KEY` (Sparkle EdDSA public key)
+- `SPARKLE_PRIVATE_KEY` (the matching Sparkle EdDSA private key)
+
+Optional Apple Developer signing and notarization secrets:
 
 - `DEVELOPER_ID_APP`
 - `APPLE_CERTIFICATE_P12` (base64-encoded `.p12` certificate)
@@ -108,4 +123,13 @@ Recommended GitHub secrets:
 - `TEAM_ID`
 - `APP_PASSWORD`
 
-If those secrets are not configured, the workflow still publishes unsigned DMG files.
+Generate the key pair with Sparkle's SwiftPM tools:
+
+```bash
+swift package resolve
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac -p
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account cleanmycodemac -x sparkle-private.key
+```
+
+The second command prints the public key. After copying the exported private key into the GitHub Secret, securely delete the local export. The Release workflow only fails when the Sparkle keys are missing; without Apple credentials it still publishes, but the package is not Apple-notarized.

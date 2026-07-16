@@ -2,9 +2,11 @@ import AppKit
 import Foundation
 import WebKit
 
+@MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var bridge: NativeBridge?
+    private var updateCoordinator: UpdateCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -35,9 +37,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             configuration.userContentController = controller
 
             let webView = WKWebView(frame: .zero, configuration: configuration)
-            let bridge = NativeBridge(webView: webView)
+            let updateCoordinator = UpdateCoordinator()
+            let bridge = NativeBridge(webView: webView, updateCoordinator: updateCoordinator)
             controller.add(bridge, name: BridgeKeys.messageHandler)
             self.bridge = bridge
+            self.updateCoordinator = updateCoordinator
 
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720),
@@ -112,6 +116,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsItem.target = self
         appMenu.addItem(settingsItem)
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        appMenu.addItem(updateItem)
         appMenu.addItem(NSMenuItem.separator())
 
         appMenu.addItem(withTitle: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -140,6 +151,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         return mainMenu
+    }
+
+    @objc
+    private func checkForUpdates(_ sender: Any?) {
+        _ = updateCoordinator?.presentAvailableUpdate()
     }
 }
 

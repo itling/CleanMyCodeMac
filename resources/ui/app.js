@@ -33,6 +33,7 @@ const UI = {
     about: '关于', author: '作者', email: '邮箱', version: '版本', langZh: '中文', langEn: 'EN',
     checkUpdate: '检查更新',
     updateNow: '更新', updateTo: '更新 {version}',
+    updateAvailable: '发现新版本 {version}', updateStarted: '正在准备 {version}，请按提示完成更新。', updateStartFailed: '暂时无法启动更新，请稍后重试。',
     alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
     alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
     confirmClean: '即将清理 {n} 个项目。\n缓存/日志等安全项目将直接删除并释放磁盘空间；文档/媒体等项目将移入废纸篓（可恢复）。确认继续？', confirmCleanTitle: '确认清理',
@@ -82,6 +83,7 @@ const UI = {
     about: 'About', author: 'Author', email: 'Email', version: 'Version', langZh: '中文', langEn: 'EN',
     checkUpdate: 'Check Update',
     updateNow: 'Update', updateTo: 'Update {version}',
+    updateAvailable: 'New version {version} is available', updateStarted: 'Preparing {version}. Follow the update prompt to finish.', updateStartFailed: 'Unable to start the update. Please try again.',
     alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
     alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
     confirmClean: 'About to clean {n} items.\nSafe items (caches/logs) will be permanently deleted to free disk space. Documents/media will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
@@ -133,10 +135,7 @@ let appMeta = {
 let updateInfo = {
   has_update: false,
   latest_version: '',
-  download_url: '',
-  release_url: 'https://github.com/itling/CleanMyCodeMac/releases/latest',
-  current_arch: '',
-  manual_only: false,
+  updater_available: false,
 };
 const startupStartedAt = Date.now();
 let bridgeObjectPromise = null;
@@ -216,7 +215,7 @@ const bridgeApi = {
   getLanguage() { return callBridge('get_language'); },
   getAppMeta() { return callBridge('get_app_meta'); },
   checkForUpdates() { return callBridge('check_for_updates'); },
-  openExternalUrl(url) { return callBridge('open_external_url', url); },
+  installUpdate() { return callBridge('install_update'); },
   setLanguage(lang) { return callBridge('set_language', lang); },
   onBootstrapReady() { return callBridge('on_bootstrap_ready'); },
 };
@@ -928,23 +927,17 @@ function applyUpdateInfo() {
   const button = document.getElementById('update-btn');
   if (!button) return;
 
-  if (!updateInfo.has_update || !updateInfo.download_url) {
-    if (updateInfo.manual_only && updateInfo.release_url) {
-      button.textContent = T('checkUpdate');
-      button.title = updateInfo.release_url;
-      button.classList.remove('hidden');
-      return;
-    }
-
+  if (!updateInfo.has_update || !updateInfo.updater_available) {
     button.classList.add('hidden');
-    button.textContent = '';
     button.title = '';
+    button.removeAttribute('aria-label');
     return;
   }
 
   const version = updateInfo.latest_version ? ('v' + updateInfo.latest_version) : '';
-  button.textContent = T('updateNow');
-  button.title = T('updateTo').replace('{version}', version);
+  const label = T('updateAvailable').replace('{version}', version);
+  button.title = label;
+  button.setAttribute('aria-label', label);
   button.classList.remove('hidden');
 }
 
@@ -1024,10 +1017,7 @@ async function loadUpdateInfo() {
       updateInfo = {
         has_update: Boolean(r.has_update),
         latest_version: r.latest_version || '',
-        download_url: r.download_url || r.release_url || '',
-        release_url: r.release_url || updateInfo.release_url,
-        current_arch: r.current_arch || '',
-        manual_only: Boolean(r.manual_only),
+        updater_available: Boolean(r.updater_available),
       };
       applyUpdateInfo();
     }
@@ -1035,17 +1025,31 @@ async function loadUpdateInfo() {
     updateInfo = {
       ...updateInfo,
       has_update: false,
-      manual_only: true,
-      download_url: '',
+      updater_available: false,
     };
     applyUpdateInfo();
   }
 }
 
-async function openUpdateDownload() {
-  const target = updateInfo.download_url || updateInfo.release_url;
-  if (!target) return;
-  await bridgeApi.openExternalUrl(target);
+async function startUpdate(button) {
+  if (!updateInfo.has_update || !updateInfo.updater_available) return;
+  if (button) {
+    button.disabled = true;
+    button.classList.add('is-updating');
+  }
+  try {
+    const result = await bridgeApi.installUpdate();
+    if (!result || result.ok === false) throw new Error(T('updateStartFailed'));
+    const version = updateInfo.latest_version ? ('v' + updateInfo.latest_version) : '';
+    showToast(T('updateStarted').replace('{version}', version), T('updateNow'), 'success');
+  } catch (_) {
+    showToast(T('updateStartFailed'), T('updateNow'), 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove('is-updating');
+    }
+  }
 }
 
 function bootstrapApp() {

@@ -23,9 +23,15 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .lang-btn.active { background: rgba(255,255,255,0.12); color: #F1F5F9; border-color: #64748B; }
 .version { font-size: 10px; color: #475569; text-align: center; line-height: 1.7; }
 .version .about-label { color: #94A3B8; display: block; margin-bottom: 4px; }
-.version-row { display: inline-flex; align-items: center; gap: 6px; justify-content: center; flex-wrap: wrap; }
-.update-btn { border: 1px solid rgba(251, 146, 60, 0.45); background: rgba(249, 115, 22, 0.14); color: #FDBA74; border-radius: 999px; padding: 2px 8px; font-size: 10px; line-height: 1.4; cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
-.update-btn:hover { background: rgba(249, 115, 22, 0.22); color: #FED7AA; border-color: rgba(251, 146, 60, 0.65); }
+.version-row { display: inline-flex; align-items: center; gap: 5px; justify-content: center; }
+.update-btn { position: relative; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(251, 146, 60, 0.42); background: rgba(249, 115, 22, 0.12); color: #FDBA74; border-radius: 7px; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+.update-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.update-btn:hover { transform: translateY(-1px); background: rgba(249, 115, 22, 0.22); color: #FFEDD5; border-color: rgba(251, 146, 60, 0.68); }
+.update-btn:focus-visible { outline: 2px solid #FDBA74; outline-offset: 2px; }
+.update-btn:disabled { cursor: wait; opacity: 0.65; transform: none; }
+.update-btn.is-updating svg { animation: update-download-pulse 0.8s ease-in-out infinite alternate; }
+.update-dot { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: #22C55E; box-shadow: 0 0 0 2px #1E293B; }
+@keyframes update-download-pulse { from { transform: translateY(-1px); opacity: 0.55; } to { transform: translateY(1px); opacity: 1; } }
 
 .hero { background: linear-gradient(135deg, #1E293B 0%, #334155 100%); padding: 56px 32px; text-align: center; }
 .hero h1 { font-size: 28px; color: #F1F5F9; margin-bottom: 8px; }

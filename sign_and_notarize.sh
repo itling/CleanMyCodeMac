@@ -128,10 +128,11 @@ require_cmd codesign
 require_cmd xcrun
 require_cmd hdiutil
 
-if [[ -z "$DEVELOPER_ID_APP" ]]; then
-  echo "Please set the signing certificate, e.g.:"
-  echo 'DEVELOPER_ID_APP="Developer ID Application: Your Name (TEAMID)" ./sign_and_notarize.sh'
-  exit 1
+SIGN_IDENTITY="${DEVELOPER_ID_APP:--}"
+USING_AD_HOC=false
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  USING_AD_HOC=true
+  echo "Developer ID is not configured; applying an ad-hoc signature for Sparkle packaging."
 fi
 
 if [[ -z "$APP_PATH" ]]; then
@@ -147,12 +148,30 @@ if [[ -z "$DMG_PATH" ]]; then
   DMG_PATH="$(resolve_default_dmg_path)"
 fi
 
-codesign --force --deep --options runtime --sign "$DEVELOPER_ID_APP" "$APP_PATH"
+SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+if [[ -d "$SPARKLE_FRAMEWORK" ]]; then
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
+  codesign --force --options runtime --preserve-metadata=entitlements --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" "$SPARKLE_FRAMEWORK"
+fi
+
+codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 if [[ -f "$DMG_PATH" ]]; then
   recreate_dmg_from_signed_app "$APP_PATH" "$DMG_PATH"
-  codesign --force --sign "$DEVELOPER_ID_APP" "$DMG_PATH"
+  codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
+fi
+
+if [[ "$USING_AD_HOC" == true ]]; then
+  echo "Ad-hoc signing complete. Apple notarization skipped."
+  exit 0
 fi
 
 if [[ -z "$APPLE_ID" || -z "$TEAM_ID" || -z "$APP_PASSWORD" ]]; then

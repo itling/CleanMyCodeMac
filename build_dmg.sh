@@ -35,6 +35,8 @@ APP_VERSION="${APP_VERSION#V}"
 APP_BUILD_VERSION_RAW="${APP_BUILD_VERSION:-$APP_VERSION}"
 APP_BUILD_VERSION="${APP_BUILD_VERSION_RAW#v}"
 APP_BUILD_VERSION="${APP_BUILD_VERSION#V}"
+SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-$(read_dotenv_value SPARKLE_PUBLIC_KEY || true)}"
+SPARKLE_FEED_BASE_URL="${SPARKLE_FEED_BASE_URL:-https://github.com/itling/cleanMyCodeMac/releases/latest/download}"
 DIST_ROOT="$PROJECT_DIR/dist"
 BUILD_ROOT="$PROJECT_DIR/build"
 SWIFT_BIN="${SWIFT_BIN:-$(command -v swift)}"
@@ -94,6 +96,8 @@ resolve_binary_path() {
 
 create_info_plist() {
   local plist_path="$1"
+  local arch="$2"
+  local feed_url="$SPARKLE_FEED_BASE_URL/appcast-$arch.xml"
   cat > "$plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -125,6 +129,14 @@ create_info_plist() {
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>SUEnableAutomaticChecks</key>
+  <false/>
+  <key>SUAutomaticallyUpdate</key>
+  <false/>
+  <key>SUFeedURL</key>
+  <string>$feed_url</string>
+  <key>SUPublicEDKey</key>
+  <string>$SPARKLE_PUBLIC_KEY</string>
 </dict>
 </plist>
 EOF
@@ -223,6 +235,7 @@ build_one_arch() {
   local app_bundle="$dist_dir/$APP_NAME.app"
   local contents_dir="$app_bundle/Contents"
   local macos_dir="$contents_dir/MacOS"
+  local frameworks_dir="$contents_dir/Frameworks"
   local resources_dir="$contents_dir/Resources"
   local dmg_staging_dir="$dist_dir/dmg"
   local dmg_name="${APP_NAME}-${arch}.dmg"
@@ -258,13 +271,20 @@ build_one_arch() {
     exit 1
   }
 
-  mkdir -p "$macos_dir" "$resources_dir"
+  mkdir -p "$macos_dir" "$resources_dir" "$frameworks_dir"
   cp "$binary_path" "$macos_dir/$APP_NAME"
   chmod +x "$macos_dir/$APP_NAME"
+  local sparkle_framework
+  sparkle_framework="$(find "$scratch_dir" -path "*/release/Sparkle.framework" -type d | head -n 1)"
+  if [[ -z "$sparkle_framework" ]]; then
+    echo "Sparkle.framework not found in: $scratch_dir"
+    exit 1
+  fi
+  ditto "$sparkle_framework" "$frameworks_dir/Sparkle.framework"
   cp "$ICON_PATH" "$resources_dir/app.icns"
   mkdir -p "$resources_dir/ui"
   cp -R "$UI_DIR/." "$resources_dir/ui/"
-  create_info_plist "$contents_dir/Info.plist"
+  create_info_plist "$contents_dir/Info.plist" "$arch"
 
   mkdir -p "$dmg_staging_dir"
   cp -R "$app_bundle" "$dmg_staging_dir/"
@@ -288,6 +308,7 @@ fi
 require_cmd hdiutil
 require_cmd xattr
 require_cmd osascript
+require_cmd ditto
 
 if [[ ! -f "$DMG_BACKGROUND_GENERATOR" ]]; then
   echo "DMG background generator not found: $DMG_BACKGROUND_GENERATOR"
