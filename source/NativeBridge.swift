@@ -21,6 +21,15 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    static func requiresMainActorExecution(method: String) -> Bool {
+        switch method {
+        case "check_for_updates", "install_update":
+            return true
+        default:
+            return false
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == BridgeKeys.messageHandler,
               let body = message.body as? [String: Any],
@@ -45,7 +54,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func handleAsync(method: String, args: [Any], id: Int) -> Bool {
-        guard Self.requiresBackgroundExecution(method: method) || method == "check_for_updates" else {
+        guard Self.requiresBackgroundExecution(method: method)
+            || Self.requiresMainActorExecution(method: method)
+        else {
             return false
         }
 
@@ -81,8 +92,17 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             }
             return true
         case "check_for_updates":
-            updateCoordinator.checkAvailability { [weak self] payload in
-                self?.resolve(id: id, payload: payload)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.updateCoordinator.checkAvailability { [weak self] payload in
+                    self?.resolve(id: id, payload: payload)
+                }
+            }
+            return true
+        case "install_update":
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.resolve(id: id, payload: ["ok": self.updateCoordinator.presentAvailableUpdate()])
             }
             return true
         default:
@@ -104,8 +124,6 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             return LanguageStore.payload()
         case "get_app_meta":
             return AppMetadata.payload()
-        case "install_update":
-            return ["ok": updateCoordinator.presentAvailableUpdate()]
         case "set_language":
             if let lang = args.first as? String {
                 LanguageStore.set(lang)
