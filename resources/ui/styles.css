@@ -38,7 +38,7 @@ body { font-family: -apple-system, "Helvetica Neue", sans-serif; background: #F5
 .gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
 .gauge-pct { font-size: 22px; font-weight: 700; }
 .gauge-label { font-size: 10px; color: #94A3B8; margin-top: 2px; }
-.disk-info { font-size: 10px; color: #94A3B8; text-align: center; margin-bottom: 12px; }
+.disk-info { min-height: 30px; font-size: 10px; line-height: 1.55; color: #94A3B8; text-align: center; white-space: pre-line; margin-bottom: 12px; }
 .perm-status { font-size: 10px; color: #94A3B8; text-align: center; margin-top: 12px; border-top: 1px solid #2D3F55; padding-top: 12px; width: 100%; }
 .perm-ok { color: #10B981; }
 .perm-warn { color: #F59E0B; }

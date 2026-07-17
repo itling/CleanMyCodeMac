@@ -162,27 +162,53 @@ enum AppBootstrapMetadata {
     }
 }
 
+struct DiskCapacitySnapshot {
+    let total: Int64
+    let free: Int64
+    let available: Int64
+
+    init(total: Int64, free: Int64, available: Int64) {
+        self.total = max(total, 0)
+        self.free = min(max(free, 0), self.total)
+        self.available = min(max(available, self.free), self.total)
+    }
+
+    var used: Int64 { max(total - free, 0) }
+    var reclaimable: Int64 { max(available - free, 0) }
+    var percentUsed: Double {
+        total > 0 ? (Double(used) / Double(total)) * 100 : 0
+    }
+
+    func payload() -> [String: Any] {
+        [
+            "total": total,
+            "free": free,
+            "available": available,
+            "reclaimable": reclaimable,
+            "used": used,
+            "percent_used": percentUsed,
+        ]
+    }
+}
+
 enum DiskInfoService {
     static func payload() -> [String: Any] {
         do {
             let attrs = try FileManager.default.attributesOfFileSystem(forPath: "/")
             let total = (attrs[.systemSize] as? NSNumber)?.int64Value ?? 0
             let free = (attrs[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
-            let used = max(total - free, 0)
-            let percent = total > 0 ? (Double(used) / Double(total)) * 100 : 0
-            return [
-                "total": total,
-                "free": free,
-                "used": used,
-                "percent_used": percent,
-            ]
+            let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [
+                .volumeAvailableCapacityForImportantUsageKey,
+            ])
+            let available = values?.volumeAvailableCapacityForImportantUsage ?? free
+
+            return DiskCapacitySnapshot(
+                total: total,
+                free: free,
+                available: available
+            ).payload()
         } catch {
-            return [
-                "total": 0,
-                "free": 0,
-                "used": 0,
-                "percent_used": 0,
-            ]
+            return DiskCapacitySnapshot(total: 0, free: 0, available: 0).payload()
         }
     }
 }

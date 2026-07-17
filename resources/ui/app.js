@@ -1,7 +1,7 @@
 /* ── i18n ── */
 const UI = {
   zh: {
-    used: '已使用', loading: '加载中...', heroDesc: '扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间',
+    used: 'APFS 已占用', loading: '加载中...', heroDesc: '扫描并清理 Mac 上的垃圾文件，快速释放磁盘空间',
     startupTitle: 'CleanMyCodeMac', startupSubtitle: '正在检查本地存储、准备清理工具并加载桌面界面。', startupCaption: '正在启动',
     startScan: '开始扫描', selectAll: '全选', clearAll: '清空',
     scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
@@ -15,7 +15,7 @@ const UI = {
     permOk: '&#10003; 完全磁盘访问已授权', permWarn: '&#9888; 未授权完全磁盘访问',
     permTrashWarn: '废纸篓访问未授权', permPartialWarn: '部分受保护目录未授权',
     permOpen: '打开授权设置',
-    diskFree: '可用',
+    diskAvailable: '可用', diskReclaimable: '系统可清除',
     badgeClean: '很干净', badgeSafe: '建议清理', badgeWarn: '谨慎清理',
     expandFiles: '展开文件列表', open: '打开', analyze: '分析',
     catTotal: '共 {size}，已选择', analysisTitle: '占用分析', analyzing: '正在分析，请稍候...',
@@ -53,7 +53,7 @@ const UI = {
     },
   },
   en: {
-    used: 'Used', loading: 'Loading...', heroDesc: 'Scan and clean junk files on your Mac to free up disk space',
+    used: 'APFS used', loading: 'Loading...', heroDesc: 'Scan and clean junk files on your Mac to free up disk space',
     startupTitle: 'CleanMyCodeMac', startupSubtitle: 'Inspecting local storage, preparing cleanup tools, and loading the desktop shell.', startupCaption: 'Starting Up',
     startScan: 'Start Scan', selectAll: 'Select All', clearAll: 'Clear',
     scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
@@ -67,7 +67,7 @@ const UI = {
     permOk: '&#10003; Full Disk Access granted', permWarn: '&#9888; Full Disk Access not granted',
     permTrashWarn: 'Trash access not granted', permPartialWarn: 'Protected folders partially not granted',
     permOpen: 'Open Settings',
-    diskFree: 'free',
+    diskAvailable: 'Available', diskReclaimable: 'System reclaimable',
     badgeClean: 'Clean', badgeSafe: 'Safe to clean', badgeWarn: 'Use caution',
     expandFiles: 'Expand file list', open: 'Open', analyze: 'Analyze',
     catTotal: 'Total {size}, selected', analysisTitle: 'Usage Analysis', analyzing: 'Analyzing, please wait...',
@@ -285,10 +285,11 @@ async function loadDisk() {
   const arc = document.getElementById('gauge-arc');
   arc.style.strokeDashoffset = 236 - 236 * (pct / 100);
   arc.style.stroke = pct < 70 ? '#10B981' : pct <= 90 ? '#F59E0B' : '#EF4444';
-  const usedG = (r.used / 1073741824).toFixed(1);
-  const totalG = (r.total / 1073741824).toFixed(1);
-  const freeG = (r.free / 1073741824).toFixed(1);
-  document.getElementById('disk-info').textContent = usedG + 'G / ' + totalG + 'G (' + T('diskFree') + ' ' + freeG + 'G)';
+  const summary = DiskPresentation.diskSummary(r, {
+    available: T('diskAvailable'),
+    reclaimable: T('diskReclaimable'),
+  });
+  document.getElementById('disk-info').textContent = summary.primary + '\n' + summary.secondary;
 }
 
 async function loadPerm() {

@@ -44,6 +44,7 @@ SWIFT_BUILD_HOME="${SWIFT_BUILD_HOME:-$BUILD_ROOT/swift-home}"
 SWIFT_CLANG_MODULE_CACHE_PATH="${SWIFT_CLANG_MODULE_CACHE_PATH:-$BUILD_ROOT/clang-module-cache}"
 ICON_PATH="$PROJECT_DIR/resources/app.icns"
 UI_DIR="$PROJECT_DIR/resources/ui"
+PRIVACY_MANIFEST_PATH="$PROJECT_DIR/resources/PrivacyInfo.xcprivacy"
 DMG_BACKGROUND_GENERATOR="$PROJECT_DIR/scripts/generate_dmg_background.swift"
 
 require_cmd() {
@@ -303,6 +304,7 @@ build_one_arch() {
   fi
   ditto "$sparkle_framework" "$frameworks_dir/Sparkle.framework"
   cp "$ICON_PATH" "$resources_dir/app.icns"
+  cp "$PRIVACY_MANIFEST_PATH" "$resources_dir/PrivacyInfo.xcprivacy"
   mkdir -p "$resources_dir/ui"
   cp -R "$UI_DIR/." "$resources_dir/ui/"
   create_info_plist "$contents_dir/Info.plist" "$arch"
