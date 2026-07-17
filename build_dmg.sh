@@ -184,6 +184,27 @@ end run
 APPLESCRIPT
 }
 
+detach_dmg() {
+  local device="$1"
+  local attempt=1
+  local max_attempts=5
+
+  while (( attempt <= max_attempts )); do
+    if hdiutil detach "$device"; then
+      return 0
+    fi
+
+    if (( attempt < max_attempts )); then
+      echo "DMG is still busy; retrying detach ($attempt/$max_attempts)..."
+      sleep 2
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo "Normal DMG detach remained busy; forcing detach."
+  hdiutil detach "$device" -force
+}
+
 create_styled_dmg() {
   local arch="$1"
   local staging_dir="$2"
@@ -214,12 +235,12 @@ create_styled_dmg() {
   fi
 
   if ! configure_dmg_window "$(basename "$mount_point")"; then
-    hdiutil detach "$device" -force || true
+    detach_dmg "$device" || true
     exit 1
   fi
 
   sync
-  hdiutil detach "$device"
+  detach_dmg "$device"
   hdiutil convert "$rw_dmg_path" \
     -format UDZO \
     -imagekey zlib-level=9 \
