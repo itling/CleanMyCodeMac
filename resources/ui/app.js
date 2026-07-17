@@ -21,7 +21,7 @@ const UI = {
     catTotal: '共 {size}，已选择', analysisTitle: '占用分析', analyzing: '正在分析，请稍候...',
     analysisConclusion: '分析结论', sameLevelUsage: '同级目录占用', treeView: '树状占用视图', analyzingShort: '分析中...', analysisFailed: '分析失败，请稍后重试。',
     upperDir: '上层目录：', dirType: '目录', fileType: '文件', percent: '占比',
-    finder: 'Finder', deleteItem: '删除', deletingItem: '删除中...', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
+    deleteItem: '删除', deletingItem: '删除中...', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
     confirmTreeDeleteTitle: '确认永久删除', confirmTreeDelete: '将永久删除以下项目并立即释放空间：\n\n{path}\n\n此操作无法撤销，确认继续？',
     treeDeleteDone: '已删除 {name}，释放 {size}', treeDeleteFailed: '删除失败，请检查文件权限后重试。', treeDeleteBlocked: '该路径不在当前分析结果中或属于受保护目录，已阻止删除。',
     runCmd: '执行命令', runningCmd: '执行中...', commandDone: '命令执行完成', commandFailed: '命令执行失败',
@@ -73,7 +73,7 @@ const UI = {
     catTotal: 'Total {size}, selected', analysisTitle: 'Usage Analysis', analyzing: 'Analyzing, please wait...',
     analysisConclusion: 'Analysis', sameLevelUsage: 'Same-level Usage', treeView: 'Tree View', analyzingShort: 'Analyzing...', analysisFailed: 'Analysis failed. Please try again.',
     upperDir: 'Parent dir: ', dirType: 'Directory', fileType: 'File', percent: 'Ratio',
-    finder: 'Finder', deleteItem: 'Delete', deletingItem: 'Deleting...', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
+    deleteItem: 'Delete', deletingItem: 'Deleting...', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
     confirmTreeDeleteTitle: 'Confirm Permanent Delete', confirmTreeDelete: 'Permanently delete this item and reclaim its space immediately?\n\n{path}\n\nThis action cannot be undone.',
     treeDeleteDone: 'Deleted {name}, reclaimed {size}', treeDeleteFailed: 'Delete failed. Check file permissions and try again.', treeDeleteBlocked: 'This path is not in the current analysis or is protected, so deletion was blocked.',
     runCmd: 'Run Command', runningCmd: 'Running...', commandDone: 'Command Completed', commandFailed: 'Command Failed',
@@ -624,26 +624,34 @@ async function doClean() {
   startScan();
 }
 
-async function openAnalysis(path, triggerButton) {
+async function openAnalysis(path, triggerButton, options) {
+  options = options || {};
+  const preserveContent = Boolean(options.preserveContent);
   currentAnalysisPath = path;
   const mask = document.getElementById('analysis-mask');
   const title = document.getElementById('analysis-title');
   const body = document.getElementById('analysis-body');
-  title.textContent = T('analysisTitle');
-  body.innerHTML = '<div class="analysis-loading" role="status"><span class="inline-spinner" aria-hidden="true"></span><span>' + T('analyzing') + '</span></div>';
-  body.setAttribute('aria-busy', 'true');
-  mask.classList.add('show');
+  AnalysisPresentation.prepareAnalysisPresentation({
+    mask,
+    title,
+    body,
+    titleText: T('analysisTitle'),
+    loadingHTML: '<div class="analysis-loading" role="status"><span class="inline-spinner" aria-hidden="true"></span><span>' + T('analyzing') + '</span></div>',
+    preserveContent,
+  });
   if (triggerButton) {
     triggerButton.disabled = true;
     triggerButton.textContent = T('analyzingShort');
   }
-  await waitForNextPaint();
+  if (!preserveContent) await waitForNextPaint();
 
   let data;
   try {
     data = await bridgeApi.analyzeTarget(path);
   } catch (error) {
-    body.innerHTML = '<div class="analysis-note">' + escapeHtml(error && error.message ? error.message : T('analysisFailed')) + '</div>';
+    if (currentAnalysisPath === path) {
+      body.innerHTML = '<div class="analysis-note">' + escapeHtml(error && error.message ? error.message : T('analysisFailed')) + '</div>';
+    }
     return;
   } finally {
     body.removeAttribute('aria-busy');
@@ -652,6 +660,7 @@ async function openAnalysis(path, triggerButton) {
       triggerButton.textContent = T('analyze');
     }
   }
+  if (currentAnalysisPath !== path) return;
   if (data.error) {
     title.textContent = T('analysisTitle');
     body.innerHTML = '<div class="analysis-note">' + escapeHtml(data.error) + '</div>';
@@ -729,8 +738,12 @@ function renderAnalysisList(title, items) {
       '<div class="analysis-row">' +
         '<div class="analysis-name" title="' + escapeHtml(item.path || item.name) + '">' + escapeHtml(item.name) + '</div>' +
         '<div class="analysis-row-actions">' +
-          '<button class="btn-mini" data-reveal="' + escapeHtml(item.path) + '">' + T('finder') + '</button>' +
-          (item.can_delete === true ? '<button class="btn-mini btn-tree-delete" data-delete-path="' + escapeHtml(item.path) + '" data-delete-name="' + escapeHtml(item.name) + '">' + T('deleteItem') + '</button>' : '') +
+          AnalysisPresentation.renderAnalysisActions({
+            path: item.path,
+            name: item.name,
+            canDelete: item.can_delete === true,
+            labels: { open: T('open'), analyze: T('analyze'), delete: T('deleteItem') },
+          }) +
         '</div>' +
         '<div class="analysis-size">' + escapeHtml(item.size_display) + '</div>' +
       '</div>'
@@ -754,8 +767,12 @@ function renderTreeNode(node, depth) {
         '<div class="tree-meta">' + escapeHtml(node.kind === 'dir' ? T('dirType') : T('fileType')) + ' · ' + T('percent') + ' ' + escapeHtml(node.percent) + '</div>' +
       '</div>' +
       '<div class="tree-actions">' +
-        '<button class="btn-mini" data-reveal="' + escapeHtml(node.path) + '">' + T('finder') + '</button>' +
-        (node.can_delete === true ? '<button class="btn-mini btn-tree-delete" data-delete-path="' + escapeHtml(node.path) + '" data-delete-name="' + escapeHtml(node.name) + '">' + T('deleteItem') + '</button>' : '') +
+        AnalysisPresentation.renderAnalysisActions({
+          path: node.path,
+          name: node.name,
+          canDelete: node.can_delete === true,
+          labels: { open: T('open'), analyze: T('analyze'), delete: T('deleteItem') },
+        }) +
         (node.can_drill ? '<button class="btn-mini" data-drill="' + escapeHtml(node.path) + '">' + T('drillDown') + '</button>' : '') +
       '</div>' +
       '<div class="tree-size">' + escapeHtml(node.size_display) + '</div>' +
@@ -792,6 +809,13 @@ function bindAnalysisActions() {
     });
   });
 
+  document.querySelectorAll('[data-analyze-path]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await openAnalysis(btn.dataset.analyzePath, btn);
+    });
+  });
+
   document.querySelectorAll('[data-delete-path]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -809,6 +833,7 @@ function bindAnalysisActions() {
       const analyzedPath = currentAnalysisPath;
       btn.disabled = true;
       btn.textContent = T('deletingItem');
+      await waitForNextPaint();
       try {
         const result = await bridgeApi.deleteAnalyzedPath(path);
         if (!result || !result.success) {
@@ -827,7 +852,7 @@ function bindAnalysisActions() {
           closeAnalysis();
           await loadResult(false);
         } else if (analyzedPath && currentAnalysisPath === analyzedPath) {
-          await openAnalysis(analyzedPath);
+          await openAnalysis(analyzedPath, null, { preserveContent: true });
         }
       } catch (_) {
         showToast(T('treeDeleteFailed'), T('treeDeleteFailed'), 'error');
