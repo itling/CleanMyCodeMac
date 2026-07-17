@@ -3,6 +3,31 @@ import Testing
 
 @Suite("Application update availability")
 struct UpdateAvailabilityTests {
+    @Test("starts the launch probe before the updater enters its startup cycle")
+    func startsInitialProbeOnce() {
+        var state = UpdateCheckState()
+
+        let firstStart = state.beginInitialProbe()
+        let secondStart = state.beginInitialProbe()
+        let requestAction = state.requestAction(sessionInProgress: true)
+
+        #expect(firstStart)
+        #expect(!secondStart)
+        #expect(requestAction == .waitForActiveProbe)
+    }
+
+    @Test("returns the cached launch result to the web UI")
+    func returnsCachedProbeResult() {
+        var state = UpdateCheckState()
+
+        let didStart = state.beginInitialProbe()
+        state.completeProbe()
+        let requestAction = state.requestAction(sessionInProgress: false)
+
+        #expect(didStart)
+        #expect(requestAction == .returnCached)
+    }
+
     @Test("available update exposes its display version")
     func availableUpdatePayload() {
         let availability = UpdateAvailability.available(version: "1.0.4")

@@ -1057,9 +1057,9 @@ function bootstrapApp() {
   applyLang();
   hideStartupScreen();
   notifyBootstrapReady();
+  window.addEventListener('load', loadUpdateInfo, { once: true });
   Promise.all([initLang(), loadAppMeta()]).then(() => {
     applyLang();
-    loadUpdateInfo();
   });
 }
 
