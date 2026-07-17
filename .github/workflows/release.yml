@@ -104,6 +104,12 @@ jobs:
         run: |
           ./sign_and_notarize.sh
 
+      - name: Verify packaged app launches
+        env:
+          APP_PATH: ${{ github.workspace }}/dist/${{ matrix.arch }}/CleanMyCodeMac.app
+        run: |
+          "$APP_PATH/Contents/MacOS/CleanMyCodeMac" --verify-launch
+
       - name: Generate signed Sparkle appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}

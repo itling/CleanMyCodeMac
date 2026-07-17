@@ -162,6 +162,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CleanMyCodeMacMain {
     static func main() {
+        if CommandLine.arguments.contains("--verify-launch") {
+            return
+        }
+
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

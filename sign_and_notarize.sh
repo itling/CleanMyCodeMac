@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="CleanMyCodeMac"
 APP_PATH="${APP_PATH:-}"
 DMG_PATH="${DMG_PATH:-}"
+AD_HOC_ENTITLEMENTS="$PROJECT_DIR/resources/ad-hoc-signing.entitlements"
 
 read_dotenv_value() {
   local key="$1"
@@ -130,9 +131,12 @@ require_cmd hdiutil
 
 SIGN_IDENTITY="${DEVELOPER_ID_APP:--}"
 USING_AD_HOC=false
+SIGNING_OPTIONS=(--force --options runtime)
+APP_SIGNING_OPTIONS=("${SIGNING_OPTIONS[@]}")
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   USING_AD_HOC=true
-  echo "Developer ID is not configured; applying an ad-hoc signature for Sparkle packaging."
+  APP_SIGNING_OPTIONS+=(--entitlements "$AD_HOC_ENTITLEMENTS")
+  echo "Developer ID is not configured; applying an ad-hoc signature with library validation disabled."
 fi
 
 if [[ -z "$APP_PATH" ]]; then
@@ -150,19 +154,27 @@ fi
 
 SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework"
 if [[ -d "$SPARKLE_FRAMEWORK" ]]; then
-  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+  codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGN_IDENTITY" \
     "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
-  codesign --force --options runtime --preserve-metadata=entitlements --sign "$SIGN_IDENTITY" \
+  codesign "${SIGNING_OPTIONS[@]}" --preserve-metadata=entitlements --sign "$SIGN_IDENTITY" \
     "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"
-  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+  codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGN_IDENTITY" \
     "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
-  codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+  codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGN_IDENTITY" \
     "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
-  codesign --force --options runtime --sign "$SIGN_IDENTITY" "$SPARKLE_FRAMEWORK"
+  codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGN_IDENTITY" "$SPARKLE_FRAMEWORK"
 fi
 
-codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH"
+codesign "${APP_SIGNING_OPTIONS[@]}" --sign "$SIGN_IDENTITY" "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+if [[ "$USING_AD_HOC" == true ]]; then
+  if ! codesign -d --entitlements - "$APP_PATH" 2>/dev/null \
+    | grep -q 'com.apple.security.cs.disable-library-validation'; then
+    echo "Ad-hoc app signature is missing the library-validation exception."
+    exit 1
+  fi
+fi
 
 if [[ -f "$DMG_PATH" ]]; then
   recreate_dmg_from_signed_app "$APP_PATH" "$DMG_PATH"
