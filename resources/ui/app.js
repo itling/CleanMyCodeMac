@@ -138,6 +138,7 @@ let updateInfo = {
   updater_available: false,
 };
 const startupStartedAt = Date.now();
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let bridgeObjectPromise = null;
 
 function waitForNextPaint() {
@@ -1031,6 +1032,11 @@ async function loadUpdateInfo() {
   }
 }
 
+async function startPeriodicUpdateChecks() {
+  await loadUpdateInfo();
+  window.setTimeout(startPeriodicUpdateChecks, UPDATE_CHECK_INTERVAL_MS);
+}
+
 async function startUpdate(button) {
   if (!updateInfo.has_update || !updateInfo.updater_available) return;
   if (button) {
@@ -1057,7 +1063,7 @@ function bootstrapApp() {
   applyLang();
   hideStartupScreen();
   notifyBootstrapReady();
-  window.addEventListener('load', loadUpdateInfo, { once: true });
+  window.addEventListener('load', startPeriodicUpdateChecks, { once: true });
   Promise.all([initLang(), loadAppMeta()]).then(() => {
     applyLang();
   });

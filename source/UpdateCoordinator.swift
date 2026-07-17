@@ -40,31 +40,41 @@ enum UpdateCheckRequestAction: Equatable {
     case startProbe
 }
 
+enum UpdateCheckPolicy {
+    static let refreshInterval: TimeInterval = 6 * 60 * 60
+}
+
 struct UpdateCheckState {
     private var probeStarted = false
-    private var probeCompleted = false
+    private var lastCompletedAt: Date?
 
     mutating func beginInitialProbe() -> Bool {
-        guard !probeStarted, !probeCompleted else { return false }
+        guard !probeStarted, lastCompletedAt == nil else { return false }
         probeStarted = true
         return true
     }
 
-    mutating func requestAction(sessionInProgress: Bool) -> UpdateCheckRequestAction {
-        if probeCompleted {
-            return .returnCached
-        }
+    mutating func requestAction(
+        sessionInProgress: Bool,
+        now: Date,
+        minimumInterval: TimeInterval
+    ) -> UpdateCheckRequestAction {
         if probeStarted || sessionInProgress {
             return .waitForActiveProbe
+        }
+        if let lastCompletedAt,
+           now.timeIntervalSince(lastCompletedAt) < minimumInterval
+        {
+            return .returnCached
         }
 
         probeStarted = true
         return .startProbe
     }
 
-    mutating func completeProbe() {
+    mutating func completeProbe(at date: Date) {
         probeStarted = false
-        probeCompleted = true
+        lastCompletedAt = date
     }
 }
 
@@ -125,7 +135,11 @@ final class UpdateCoordinator: NSObject, SPUUpdaterDelegate {
             return
         }
 
-        switch checkState.requestAction(sessionInProgress: updater.sessionInProgress) {
+        switch checkState.requestAction(
+            sessionInProgress: updater.sessionInProgress,
+            now: Date(),
+            minimumInterval: UpdateCheckPolicy.refreshInterval
+        ) {
         case .returnCached:
             logger.notice("Returning cached update availability to web UI")
             completion(availability.dictionary())
@@ -168,7 +182,7 @@ final class UpdateCoordinator: NSObject, SPUUpdaterDelegate {
             availability = .unavailable(reason: error.localizedDescription)
         }
 
-        checkState.completeProbe()
+        checkState.completeProbe(at: Date())
         let payload = availability.dictionary()
         let completions = availabilityCompletions
         availabilityCompletions.removeAll()
