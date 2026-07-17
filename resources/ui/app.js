@@ -21,7 +21,9 @@ const UI = {
     catTotal: '共 {size}，已选择', analysisTitle: '占用分析', analyzing: '正在分析，请稍候...',
     analysisConclusion: '分析结论', sameLevelUsage: '同级目录占用', treeView: '树状占用视图', analyzingShort: '分析中...', analysisFailed: '分析失败，请稍后重试。',
     upperDir: '上层目录：', dirType: '目录', fileType: '文件', percent: '占比',
-    finder: 'Finder', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
+    finder: 'Finder', deleteItem: '删除', deletingItem: '删除中...', drillDown: '深入分析', copied: '已复制', copyCmd: '复制命令',
+    confirmTreeDeleteTitle: '确认永久删除', confirmTreeDelete: '将永久删除以下项目并立即释放空间：\n\n{path}\n\n此操作无法撤销，确认继续？',
+    treeDeleteDone: '已删除 {name}，释放 {size}', treeDeleteFailed: '删除失败，请检查文件权限后重试。', treeDeleteBlocked: '该路径不在当前分析结果中或属于受保护目录，已阻止删除。',
     runCmd: '执行命令', runningCmd: '执行中...', commandDone: '命令执行完成', commandFailed: '命令执行失败',
     commandNoOutput: '命令执行完成，没有输出。',
     confirmSystemPrune: '将删除所有未使用镜像、停止的容器、网络和 build cache。此操作不可撤销，但不会删除 volume。确认执行？',
@@ -71,7 +73,9 @@ const UI = {
     catTotal: 'Total {size}, selected', analysisTitle: 'Usage Analysis', analyzing: 'Analyzing, please wait...',
     analysisConclusion: 'Analysis', sameLevelUsage: 'Same-level Usage', treeView: 'Tree View', analyzingShort: 'Analyzing...', analysisFailed: 'Analysis failed. Please try again.',
     upperDir: 'Parent dir: ', dirType: 'Directory', fileType: 'File', percent: 'Ratio',
-    finder: 'Finder', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
+    finder: 'Finder', deleteItem: 'Delete', deletingItem: 'Deleting...', drillDown: 'Drill Down', copied: 'Copied', copyCmd: 'Copy Command',
+    confirmTreeDeleteTitle: 'Confirm Permanent Delete', confirmTreeDelete: 'Permanently delete this item and reclaim its space immediately?\n\n{path}\n\nThis action cannot be undone.',
+    treeDeleteDone: 'Deleted {name}, reclaimed {size}', treeDeleteFailed: 'Delete failed. Check file permissions and try again.', treeDeleteBlocked: 'This path is not in the current analysis or is protected, so deletion was blocked.',
     runCmd: 'Run Command', runningCmd: 'Running...', commandDone: 'Command Completed', commandFailed: 'Command Failed',
     commandNoOutput: 'Command completed without output.',
     confirmSystemPrune: 'This removes all unused images, stopped containers, networks, and build cache. It cannot be undone, but volumes are kept. Run it now?',
@@ -127,6 +131,7 @@ let lastKnownLogs = [];
 let latestScanState = null;
 let expandedCategories = new Set(CAT_ORDER);
 let expandedSubGroups = new Set();
+let currentAnalysisPath = null;
 const initialAppMeta = window.__cleanMyCodeMacAppMeta || {};
 let appMeta = {
   version: initialAppMeta.version || '1.0.0',
@@ -211,6 +216,7 @@ const bridgeApi = {
   selectAll(selected) { return callBridge('select_all', selected); },
   cleanPaths(paths) { return callBridge('clean_paths', paths); },
   analyzeTarget(path) { return callBridge('analyze_target', path); },
+  deleteAnalyzedPath(path) { return callBridge('delete_analyzed_path', path); },
   runDockerCommand(actionID) { return callBridge('run_docker_command', actionID); },
   revealPath(path) { return callBridge('reveal_path', path); },
   getLanguage() { return callBridge('get_language'); },
@@ -619,6 +625,7 @@ async function doClean() {
 }
 
 async function openAnalysis(path, triggerButton) {
+  currentAnalysisPath = path;
   const mask = document.getElementById('analysis-mask');
   const title = document.getElementById('analysis-title');
   const body = document.getElementById('analysis-body');
@@ -721,6 +728,10 @@ function renderAnalysisList(title, items) {
     items.map(item =>
       '<div class="analysis-row">' +
         '<div class="analysis-name" title="' + escapeHtml(item.path || item.name) + '">' + escapeHtml(item.name) + '</div>' +
+        '<div class="analysis-row-actions">' +
+          '<button class="btn-mini" data-reveal="' + escapeHtml(item.path) + '">' + T('finder') + '</button>' +
+          (item.can_delete === true ? '<button class="btn-mini btn-tree-delete" data-delete-path="' + escapeHtml(item.path) + '" data-delete-name="' + escapeHtml(item.name) + '">' + T('deleteItem') + '</button>' : '') +
+        '</div>' +
         '<div class="analysis-size">' + escapeHtml(item.size_display) + '</div>' +
       '</div>'
     ).join('') +
@@ -744,6 +755,7 @@ function renderTreeNode(node, depth) {
       '</div>' +
       '<div class="tree-actions">' +
         '<button class="btn-mini" data-reveal="' + escapeHtml(node.path) + '">' + T('finder') + '</button>' +
+        (node.can_delete === true ? '<button class="btn-mini btn-tree-delete" data-delete-path="' + escapeHtml(node.path) + '" data-delete-name="' + escapeHtml(node.name) + '">' + T('deleteItem') + '</button>' : '') +
         (node.can_drill ? '<button class="btn-mini" data-drill="' + escapeHtml(node.path) + '">' + T('drillDown') + '</button>' : '') +
       '</div>' +
       '<div class="tree-size">' + escapeHtml(node.size_display) + '</div>' +
@@ -777,6 +789,52 @@ function bindAnalysisActions() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await bridgeApi.revealPath(btn.dataset.reveal);
+    });
+  });
+
+  document.querySelectorAll('[data-delete-path]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const path = btn.dataset.deletePath;
+      const name = btn.dataset.deleteName || path;
+      if (!path) return;
+
+      const confirmed = await showConfirm(
+        T('confirmTreeDelete').replace('{path}', path),
+        T('confirmTreeDeleteTitle'),
+        { danger: true, confirmLabel: T('deleteItem') }
+      );
+      if (!confirmed) return;
+
+      const analyzedPath = currentAnalysisPath;
+      btn.disabled = true;
+      btn.textContent = T('deletingItem');
+      try {
+        const result = await bridgeApi.deleteAnalyzedPath(path);
+        if (!result || !result.success) {
+          const blocked = result && (result.error === 'not_authorized' || result.error === 'protected_path');
+          showToast(blocked ? T('treeDeleteBlocked') : T('treeDeleteFailed'), T('treeDeleteFailed'), 'error');
+          return;
+        }
+
+        showToast(
+          T('treeDeleteDone').replace('{name}', name).replace('{size}', result.removed || '0 B'),
+          T('deleteItem'),
+          'success'
+        );
+        await loadDisk();
+        if (path === analyzedPath) {
+          closeAnalysis();
+          await loadResult(false);
+        } else if (analyzedPath && currentAnalysisPath === analyzedPath) {
+          await openAnalysis(analyzedPath);
+        }
+      } catch (_) {
+        showToast(T('treeDeleteFailed'), T('treeDeleteFailed'), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = T('deleteItem');
+      }
     });
   });
 
@@ -846,15 +904,18 @@ function showAlert(message, title) {
   });
 }
 
-function showConfirm(message, title) {
+function showConfirm(message, title, options) {
   title = title || T('confirm');
+  options = options || {};
+  const confirmClass = options.danger ? 'btn-dialog-danger' : 'btn-dialog-primary';
+  const confirmLabel = options.confirmLabel || T('ok');
   return new Promise(resolve => {
     const mask = document.getElementById('dialog-mask');
     document.getElementById('dialog-title').textContent = title;
     document.getElementById('dialog-body').textContent = message;
     document.getElementById('dialog-actions').innerHTML =
       '<button class="btn-dialog-secondary" onclick="closeDialog(false)">' + T('cancel') + '</button>' +
-      '<button class="btn-dialog-primary" onclick="closeDialog(true)">' + T('ok') + '</button>';
+      '<button class="' + confirmClass + '" onclick="closeDialog(true)">' + escapeHtml(confirmLabel) + '</button>';
     dialogResolver = resolve;
     mask.classList.add('show');
   });
@@ -890,6 +951,7 @@ function showToast(message, title, type) {
 function closeAnalysis(event) {
   if (event && event.target !== document.getElementById('analysis-mask')) return;
   document.getElementById('analysis-mask').classList.remove('show');
+  currentAnalysisPath = null;
 }
 
 function escapeHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

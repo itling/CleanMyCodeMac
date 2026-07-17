@@ -115,6 +115,7 @@ enum BridgeBootstrap {
           selectAll: 'select_all',
           cleanPaths: 'clean_paths',
           analyzeTarget: 'analyze_target',
+          deleteAnalyzedPath: 'delete_analyzed_path',
           runDockerCommand: 'run_docker_command',
           revealPath: 'reveal_path',
           getLanguage: 'get_language',

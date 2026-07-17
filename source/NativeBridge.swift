@@ -14,7 +14,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
 
     static func requiresBackgroundExecution(method: String) -> Bool {
         switch method {
-        case "analyze_target", "clean_paths", "run_docker_command":
+        case "analyze_target", "delete_analyzed_path", "clean_paths", "run_docker_command":
             return true
         default:
             return false
@@ -70,6 +70,16 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
                 self.resolve(id: id, payload: self.scanEngine.analysisPayload(for: target, lang: lang))
+            }
+            return true
+        case "delete_analyzed_path":
+            guard let target = args.first as? String, !target.isEmpty else {
+                resolve(id: id, payload: ["success": false, "error": "invalid_path"])
+                return true
+            }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                self.resolve(id: id, payload: self.scanEngine.deleteAnalyzedPath(target))
             }
             return true
         case "clean_paths":

@@ -937,6 +937,7 @@ final class NativeScanEngine: @unchecked Sendable {
     private var items: [NativeScanItem] = []
     private var progress: NativeScanProgress = .idle
     private var hasRunScan = false
+    private var analysisDeletionPaths: Set<String> = []
 
     func startScan(categories: [String], lang: String) {
         let requested = categories.isEmpty
@@ -1068,6 +1069,7 @@ final class NativeScanEngine: @unchecked Sendable {
 
     func analysisPayload(for target: String, lang: String) -> [String: Any] {
         let url = URL(fileURLWithPath: target)
+        replaceAnalysisDeletionPaths(with: [])
         let isDirectory = NativeFileMetrics.isDirectory(url)
         let repositorySize = isDirectory
             ? GitRepositoryScanner.scan(roots: [url]).first(where: { $0.url.path == url.standardizedFileURL.path })?.sizeBytes
@@ -1087,6 +1089,7 @@ final class NativeScanEngine: @unchecked Sendable {
                 return [
                     "name": sibling.lastPathComponent,
                     "path": sibling.path,
+                    "can_delete": !Self.isProtectedAnalysisDeletionPath(sibling.path),
                     "size": siblingSize,
                     "size_display": NativeFormat.size(siblingSize),
                 ]
@@ -1110,16 +1113,132 @@ final class NativeScanEngine: @unchecked Sendable {
             "highlights": NativeText.analysisHighlights(url: url, size: NativeFormat.size(size), lang: lang),
             "same_level_items": siblingRows,
         ]
+        var authorizedDeletionPaths = Set(siblingRows.compactMap { row -> String? in
+            guard row["can_delete"] as? Bool == true,
+                  let path = row["path"] as? String
+            else {
+                return nil
+            }
+            let normalizedPath = Self.normalizedAnalysisPath(path)
+            return normalizedPath.isEmpty ? nil : normalizedPath
+        })
 
         if isDirectory, let tree = directoryTreePayload(url: url, size: size, parentSize: size, depth: 0, maxDepth: 1) {
             payload["tree"] = tree
+            authorizedDeletionPaths.formUnion(deletionPaths(in: tree))
         }
+        replaceAnalysisDeletionPaths(with: authorizedDeletionPaths)
 
         if isDockerDataRoot(url) {
             payload["special"] = dockerSpecialPayload(lang: lang)
         }
 
         return payload
+    }
+
+    func deleteAnalyzedPath(_ path: String) -> [String: Any] {
+        let normalizedPath = Self.normalizedAnalysisPath(path)
+        guard !normalizedPath.isEmpty else {
+            return ["success": false, "error": "invalid_path"]
+        }
+        guard !Self.isProtectedAnalysisDeletionPath(normalizedPath) else {
+            return ["success": false, "error": "protected_path"]
+        }
+
+        lock.lock()
+        let isAuthorized = analysisDeletionPaths.contains(normalizedPath)
+        lock.unlock()
+        guard isAuthorized else {
+            return ["success": false, "error": "not_authorized"]
+        }
+
+        let url = URL(fileURLWithPath: normalizedPath)
+        guard FileManager.default.fileExists(atPath: normalizedPath) else {
+            return ["success": false, "error": "not_found"]
+        }
+
+        let removedBytes = NativeFileMetrics.itemSize(url)
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            return ["success": false, "error": "delete_failed"]
+        }
+
+        lock.lock()
+        analysisDeletionPaths = analysisDeletionPaths.filter {
+            $0 != normalizedPath && !$0.hasPrefix(normalizedPath + "/")
+        }
+        items.removeAll {
+            $0.pathString == normalizedPath || $0.pathString.hasPrefix(normalizedPath + "/")
+        }
+        lock.unlock()
+
+        return [
+            "success": true,
+            "removed_bytes": removedBytes,
+            "removed": NativeFormat.size(removedBytes),
+        ]
+    }
+
+    static func isProtectedAnalysisDeletionPath(_ path: String) -> Bool {
+        let normalizedPath = normalizedAnalysisPath(path)
+        guard !normalizedPath.isEmpty else { return true }
+
+        let resolvedPath = URL(fileURLWithPath: normalizedPath)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL.path
+        let homePath = FileManager.default.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath()
+            .standardizedFileURL.path
+        let temporaryPath = FileManager.default.temporaryDirectory
+            .resolvingSymlinksInPath()
+            .standardizedFileURL.path
+
+        if resolvedPath == "/" || resolvedPath == homePath {
+            return true
+        }
+        if resolvedPath.hasPrefix(homePath + "/") {
+            let protectedHomeDirectories = [
+                "Applications", "Desktop", "Documents", "Downloads", "Library",
+                "Movies", "Music", "Pictures", "Public", ".Trash",
+            ].map { homePath + "/" + $0 }
+            return protectedHomeDirectories.contains(resolvedPath)
+        }
+        if resolvedPath == temporaryPath || resolvedPath.hasPrefix(temporaryPath + "/") {
+            return false
+        }
+
+        let protectedRoots = ["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/private", "/Users"]
+        return protectedRoots.contains {
+            resolvedPath == $0 || resolvedPath.hasPrefix($0 + "/")
+        }
+    }
+
+    private static func normalizedAnalysisPath(_ path: String) -> String {
+        guard path.hasPrefix("/") else { return "" }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private func replaceAnalysisDeletionPaths(with paths: Set<String>) {
+        lock.lock()
+        analysisDeletionPaths = paths
+        lock.unlock()
+    }
+
+    private func deletionPaths(in node: [String: Any]) -> Set<String> {
+        var paths: Set<String> = []
+        if let path = node["path"] as? String {
+            let normalizedPath = Self.normalizedAnalysisPath(path)
+            if !normalizedPath.isEmpty, !Self.isProtectedAnalysisDeletionPath(normalizedPath) {
+                paths.insert(normalizedPath)
+            }
+        }
+        if let children = node["children"] as? [[String: Any]] {
+            for child in children {
+                paths.formUnion(deletionPaths(in: child))
+            }
+        }
+        return paths
     }
 
     private func isDockerDataRoot(_ url: URL) -> Bool {
@@ -1159,6 +1278,7 @@ final class NativeScanEngine: @unchecked Sendable {
             "name": url.lastPathComponent,
             "path": url.path,
             "kind": NativeFileMetrics.isDirectory(url) ? "dir" : "file",
+            "can_delete": !Self.isProtectedAnalysisDeletionPath(url.path),
             "size": size,
             "size_display": NativeFormat.size(size),
             "percent": parentSize > 0 ? String(format: "%.1f%%", Double(size) / Double(parentSize) * 100) : "100%",
