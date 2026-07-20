@@ -439,6 +439,11 @@ private enum LogsScanner {
 }
 
 enum DevCacheScanner {
+    struct AIDeveloperToolCacheSpec {
+        let toolName: String
+        let patterns: [String]
+    }
+
     private static let languageCaches: [(String, [String])] = [
         ("Node.js", ["~/.npm/_cacache", "~/.yarn/cache", "~/.pnpm-store", "~/.bun/install/cache", "~/.nvm/.cache", "~/.volta/cache"]),
         ("Python", ["~/Library/Caches/pip", "~/.cache/pip", "~/.conda/pkgs", "~/.pyenv/cache", "~/Library/Caches/pypoetry"]),
@@ -477,12 +482,6 @@ enum DevCacheScanner {
         ("VS Code", "Code"),
         ("VS Code Insiders", "Code - Insiders"),
         ("Sublime Text", "Sublime Text"),
-        ("Cursor", "Cursor"),
-        ("Windsurf", "Windsurf"),
-        ("Trae", "Trae"),
-        ("Trae CN", "Trae CN"),
-        ("Antigravity", "Antigravity"),
-        ("Zed", "Zed"),
         ("Aide", "Aide"),
         ("Void", "Void"),
         ("HBuilderX", "HBuilder X"),
@@ -492,6 +491,88 @@ enum DevCacheScanner {
         ("Postman", "Postman"),
         ("Insomnia", "Insomnia"),
     ]
+
+    private static let aiCLITransientDirs = [
+        "cache", "caches", "Cache", "Caches", "log", "logs", "tmp", "temp", "telemetry",
+    ]
+
+    private static let aiElectronCacheDirs = [
+        "Cache", "CachedData", "CachedExtensionVSIXs", "CachedExtensions",
+        "CachedProfilesData", "CachedConfigurations", "Code Cache", "GPUCache",
+        "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache",
+        "GPUPersistentCache", "component_crx_cache", "extensions_crx_cache",
+        "Crashpad", "CrashReport", "logs", "sentry",
+    ]
+
+    // Tokscale's supported-provider catalog is the coverage baseline:
+    // https://github.com/junhoyeo/tokscale#overview
+    // Only transient subdirectories are included here; session, project, memory,
+    // and configuration locations intentionally remain outside the cleaner.
+    static let aiDeveloperToolCaches: [AIDeveloperToolCacheSpec] = [
+        aiTool("OpenCode", homes: ["~/.opencode", "~/.local/share/opencode"], apps: ["OpenCode"], caches: ["opencode"]),
+        aiTool("Claude Code", homes: ["~/.claude"], apps: ["Claude", "Claude-3p"], caches: ["Claude", "claude-cli-nodejs"], explicit: ["~/.cache/claude"], logs: ["Claude", "Claude-3p"]),
+        aiTool("OpenClaw", homes: ["~/.openclaw", "~/.clawdbot", "~/.moltbot", "~/.moldbot"], apps: ["OpenClaw"], caches: ["OpenClaw", "openclaw"]),
+        aiTool("Codex", homes: ["~/.codex"], apps: ["Codex", "com.openai.codex", "OpenAI/Codex"], caches: ["Codex", "com.openai.codex"], explicit: ["~/.cache/codex-runtimes", "~/.codex/.tmp"], logs: ["com.openai.codex"]),
+        aiTool("GitHub Copilot CLI", homes: ["~/.copilot"], apps: ["GitHub Copilot"], caches: ["GitHub Copilot", "github-copilot"]),
+        aiTool("Hermes Agent", homes: ["~/.hermes"], apps: ["Hermes"], caches: ["hermes"]),
+        aiTool("Gemini CLI", homes: ["~/.gemini"], apps: ["Gemini"], caches: ["gemini"]),
+        aiTool("Cursor", homes: ["~/.cursor"], apps: ["Cursor"], caches: ["Cursor"]),
+        aiTool("Amp", homes: ["~/.amp", "~/.local/share/amp"], apps: ["Amp"], caches: ["amp"]),
+        aiTool("Codebuff", homes: ["~/.config/manicode", "~/.config/manicode-dev", "~/.config/manicode-staging"], apps: ["Codebuff"], caches: ["codebuff", "manicode"]),
+        aiTool("Factory Droid", homes: ["~/.factory"], apps: ["Droid"], caches: ["factory", "droid"]),
+        aiTool("Pi", homes: ["~/.pi/agent", "~/.omp/agent"], apps: ["Pi"], caches: ["pi", "omp"]),
+        aiTool("Kimi CLI", homes: ["~/.kimi", "~/.kimi-code"], apps: ["Kimi"], caches: ["kimi", "kimi-code"]),
+        aiTool("Qwen CLI", homes: ["~/.qwen"], apps: ["Qwen"], caches: ["qwen"]),
+        aiTool("Roo Code", homes: ["~/.roo"], apps: ["Roo Code"], caches: ["roo-code"]),
+        aiTool("Kilo", homes: ["~/.kilo"], apps: ["Kilo Code"], caches: ["kilo", "kilo-code"]),
+        aiTool("Kilo CLI", homes: ["~/.local/share/kilo"], apps: ["Kilo CLI"], caches: ["kilo-cli"]),
+        aiTool("Mux", homes: ["~/.mux"], apps: ["Mux"], caches: ["mux"]),
+        aiTool("Crush", homes: ["~/.local/share/crush", "~/.crush"], apps: ["Crush"], caches: ["crush"]),
+        aiTool("Goose", homes: ["~/.local/share/goose", "~/.goose"], apps: ["Goose"], caches: ["goose"]),
+        aiTool("Antigravity", homes: ["~/.antigravity"], apps: ["Antigravity"], caches: ["Antigravity", "antigravity"]),
+        aiTool("Antigravity CLI", homes: ["~/.gemini/antigravity-cli"], caches: ["antigravity-cli"]),
+        aiTool("Zed", homes: ["~/.zed"], apps: ["Zed"], caches: ["Zed"]),
+        aiTool("Kiro", homes: ["~/.kiro", "~/.local/share/kiro-cli"], apps: ["Kiro"], caches: ["Kiro", "kiro-cli"]),
+        aiTool("Trae", homes: ["~/.trae"], apps: ["Trae", "TRAE SOLO"], caches: ["Trae", "TRAE SOLO"]),
+        aiTool("Warp/Oz", homes: ["~/.warp", "~/.oz"], apps: ["Warp"], caches: ["dev.warp.Warp-Stable", "Warp"]),
+        aiTool("Cline", homes: ["~/.cline"], apps: ["Cline"], caches: ["cline"]),
+        aiTool("Gajae-Code", homes: ["~/.gjc", "~/.local/share/gjc"], apps: ["Gajae-Code"], caches: ["gjc"]),
+        aiTool("Grok Build", homes: ["~/.grok"], apps: ["Grok"], caches: ["grok"]),
+        aiTool("Jcode", homes: ["~/.jcode"], apps: ["Jcode"], caches: ["jcode"]),
+        aiTool("MiMo Code", homes: ["~/.local/share/mimocode", "~/.mimocode"], apps: ["MiMo Code"], caches: ["mimocode"]),
+        aiTool("Command Code", homes: ["~/.commandcode"], apps: ["Command Code"], caches: ["commandcode"]),
+        aiTool("Junie", homes: ["~/.junie"], apps: ["Junie"], caches: ["junie"]),
+        aiTool("ZCode", homes: ["~/.zcode"], apps: ["ZCode"], caches: ["zcode"]),
+        aiTool("OpenCodeReview", homes: ["~/.opencodereview"], apps: ["OpenCodeReview"], caches: ["opencodereview"]),
+        aiTool("CodeBuddy", homes: ["~/.codebuddy", "~/.codebuddycn"], apps: ["CodeBuddy", "CodeBuddy CN", "com.tencent.codebuddycn", "CodeBuddyExtension"], caches: ["CodeBuddy", "CodeBuddy CN", "com.tencent.codebuddy.ShipIt", "com.tencent.codebuddycn.ShipIt"], explicit: ["~/.codebuddy/plugins/cache"]),
+        aiTool("WorkBuddy", homes: ["~/.workbuddy"], apps: ["WorkBuddy", "@genie/workbuddy-desktop"], caches: ["WorkBuddy", "com.workbuddy.workbuddy.BundleMigration"], logs: ["WorkBuddy"]),
+        aiTool("Devin CLI", homes: ["~/.local/share/devin/cli", "~/.devin"], caches: ["devin"]),
+        aiTool("Devin Desktop", apps: ["Devin"], caches: ["Devin"]),
+        aiTool("Synthetic / Octofriend", homes: ["~/.local/share/octofriend", "~/.octofriend"], apps: ["Octofriend"], caches: ["octofriend"]),
+        aiTool("Qoder", homes: ["~/.qoder", "~/.Qoder"], apps: ["Qoder"], caches: ["Qoder", "qoder"]),
+        aiTool("Trae CN", homes: ["~/.trae-cn"], apps: ["Trae CN", "TRAE SOLO CN"], caches: ["Trae CN", "TRAE SOLO CN"]),
+        aiTool("Windsurf", homes: ["~/.windsurf"], apps: ["Windsurf"], caches: ["Windsurf"]),
+    ]
+
+    private static func aiTool(
+        _ toolName: String,
+        homes: [String] = [],
+        apps: [String] = [],
+        caches: [String] = [],
+        explicit: [String] = [],
+        logs: [String] = []
+    ) -> AIDeveloperToolCacheSpec {
+        var patterns = explicit
+        patterns += homes.flatMap { home in aiCLITransientDirs.map { "\(home)/\($0)" } }
+        patterns += apps.flatMap { app in
+            aiElectronCacheDirs.map { "~/Library/Application Support/\(app)/\($0)" }
+        }
+        patterns += caches.flatMap { cache in
+            ["~/.cache/\(cache)", "~/Library/Caches/\(cache)"]
+        }
+        patterns += logs.map { "~/Library/Logs/\($0)" }
+        return AIDeveloperToolCacheSpec(toolName: toolName, patterns: patterns)
+    }
 
     private static let toolCaches: [(String, [String])] = [
         ("Xcode", ["~/Library/Developer/Xcode/DerivedData", "~/Library/Developer/Xcode/Archives", "~/Library/Developer/Xcode/iOS DeviceSupport", "~/Library/Developer/CoreSimulator/Caches", "~/Library/Developer/CoreSimulator/Devices"]),
@@ -611,6 +692,31 @@ enum DevCacheScanner {
                             lastModified: NativeFileMetrics.modifiedDate(url),
                             description: NativeText.devToolCacheDescription(
                                 tool: toolName,
+                                pathName: url.lastPathComponent,
+                                lang: lang
+                            )
+                        )
+                    )
+                }
+            }
+        }
+
+        for spec in aiDeveloperToolCaches {
+            for pattern in spec.patterns {
+                for url in NativePaths.expand(pattern) {
+                    let size = NativeFileMetrics.itemSize(url)
+                    guard size >= 100 * 1024 else { continue }
+                    addUnique(
+                        NativeScanItem(
+                            path: url,
+                            sizeBytes: size,
+                            category: "dev_cache",
+                            appName: spec.toolName,
+                            isSafe: true,
+                            selected: true,
+                            lastModified: NativeFileMetrics.modifiedDate(url),
+                            description: NativeText.devToolCacheDescription(
+                                tool: spec.toolName,
                                 pathName: url.lastPathComponent,
                                 lang: lang
                             )
