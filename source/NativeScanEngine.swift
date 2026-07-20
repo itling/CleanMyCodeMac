@@ -439,9 +439,22 @@ private enum LogsScanner {
 }
 
 enum DevCacheScanner {
+    enum AICacheRisk: Equatable {
+        case safe
+        case cautious
+    }
+
+    struct AIDeveloperToolCacheTarget {
+        let pattern: String
+        let risk: AICacheRisk
+    }
+
     struct AIDeveloperToolCacheSpec {
         let toolName: String
-        let patterns: [String]
+        let protectedRoots: [String]
+        let targets: [AIDeveloperToolCacheTarget]
+
+        var patterns: [String] { targets.map(\.pattern) }
     }
 
     private static let languageCaches: [(String, [String])] = [
@@ -472,18 +485,16 @@ enum DevCacheScanner {
         ("MATLAB", ["~/Library/Caches/MathWorks"]),
     ]
 
-    private static let electronCacheDirs = [
+    static let editorCacheDirs = [
         "Cache", "CachedData", "CachedExtensionVSIXs", "CachedExtensions",
         "CachedProfilesData", "CachedConfigurations", "Code Cache", "GPUCache",
-        "DawnCache", "Service Worker", "User/workspaceStorage", "logs",
+        "DawnCache",
     ]
 
     private static let electronEditors: [(String, String)] = [
         ("VS Code", "Code"),
         ("VS Code Insiders", "Code - Insiders"),
         ("Sublime Text", "Sublime Text"),
-        ("Aide", "Aide"),
-        ("Void", "Void"),
         ("HBuilderX", "HBuilder X"),
         ("HBuilderX", "HBuilderX"),
         ("Atom", "Atom"),
@@ -492,16 +503,11 @@ enum DevCacheScanner {
         ("Insomnia", "Insomnia"),
     ]
 
-    private static let aiCLITransientDirs = [
-        "cache", "caches", "Cache", "Caches", "log", "logs", "tmp", "temp", "telemetry",
-    ]
-
-    private static let aiElectronCacheDirs = [
+    static let aiElectronCacheDirs = [
         "Cache", "CachedData", "CachedExtensionVSIXs", "CachedExtensions",
         "CachedProfilesData", "CachedConfigurations", "Code Cache", "GPUCache",
         "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache",
         "GPUPersistentCache", "component_crx_cache", "extensions_crx_cache",
-        "Crashpad", "CrashReport", "logs", "sentry",
     ]
 
     // Tokscale's supported-provider catalog is the coverage baseline:
@@ -510,9 +516,9 @@ enum DevCacheScanner {
     // and configuration locations intentionally remain outside the cleaner.
     static let aiDeveloperToolCaches: [AIDeveloperToolCacheSpec] = [
         aiTool("OpenCode", homes: ["~/.opencode", "~/.local/share/opencode"], apps: ["OpenCode"], caches: ["opencode"]),
-        aiTool("Claude Code", homes: ["~/.claude"], apps: ["Claude", "Claude-3p"], caches: ["Claude", "claude-cli-nodejs"], explicit: ["~/.cache/claude"], logs: ["Claude", "Claude-3p"]),
+        aiTool("Claude Code", homes: ["~/.claude"], apps: ["Claude", "Claude-3p"], caches: ["Claude"], safeExplicit: ["~/.claude/cache"]),
         aiTool("OpenClaw", homes: ["~/.openclaw", "~/.clawdbot", "~/.moltbot", "~/.moldbot"], apps: ["OpenClaw"], caches: ["OpenClaw", "openclaw"]),
-        aiTool("Codex", homes: ["~/.codex"], apps: ["Codex", "com.openai.codex", "OpenAI/Codex"], caches: ["Codex", "com.openai.codex"], explicit: ["~/.cache/codex-runtimes", "~/.codex/.tmp"], logs: ["com.openai.codex"]),
+        aiTool("Codex", homes: ["~/.codex"], apps: ["Codex", "com.openai.codex", "OpenAI/Codex"], caches: ["Codex", "com.openai.codex"], safeExplicit: ["~/.codex/cache"], cautiousExplicit: ["~/.cache/codex-runtimes"]),
         aiTool("GitHub Copilot CLI", homes: ["~/.copilot"], apps: ["GitHub Copilot"], caches: ["GitHub Copilot", "github-copilot"]),
         aiTool("Hermes Agent", homes: ["~/.hermes"], apps: ["Hermes"], caches: ["hermes"]),
         aiTool("Gemini CLI", homes: ["~/.gemini"], apps: ["Gemini"], caches: ["gemini"]),
@@ -544,14 +550,16 @@ enum DevCacheScanner {
         aiTool("Junie", homes: ["~/.junie"], apps: ["Junie"], caches: ["junie"]),
         aiTool("ZCode", homes: ["~/.zcode"], apps: ["ZCode"], caches: ["zcode"]),
         aiTool("OpenCodeReview", homes: ["~/.opencodereview"], apps: ["OpenCodeReview"], caches: ["opencodereview"]),
-        aiTool("CodeBuddy", homes: ["~/.codebuddy", "~/.codebuddycn"], apps: ["CodeBuddy", "CodeBuddy CN", "com.tencent.codebuddycn", "CodeBuddyExtension"], caches: ["CodeBuddy", "CodeBuddy CN", "com.tencent.codebuddy.ShipIt", "com.tencent.codebuddycn.ShipIt"], explicit: ["~/.codebuddy/plugins/cache"]),
-        aiTool("WorkBuddy", homes: ["~/.workbuddy"], apps: ["WorkBuddy", "@genie/workbuddy-desktop"], caches: ["WorkBuddy", "com.workbuddy.workbuddy.BundleMigration"], logs: ["WorkBuddy"]),
+        aiTool("CodeBuddy", homes: ["~/.codebuddy", "~/.codebuddycn"], apps: ["CodeBuddy", "CodeBuddy CN", "com.tencent.codebuddycn"], caches: ["CodeBuddy", "CodeBuddy CN"]),
+        aiTool("WorkBuddy", homes: ["~/.workbuddy"], apps: ["WorkBuddy", "@genie/workbuddy-desktop"], caches: ["WorkBuddy"]),
         aiTool("Devin CLI", homes: ["~/.local/share/devin/cli", "~/.devin"], caches: ["devin"]),
         aiTool("Devin Desktop", apps: ["Devin"], caches: ["Devin"]),
         aiTool("Synthetic / Octofriend", homes: ["~/.local/share/octofriend", "~/.octofriend"], apps: ["Octofriend"], caches: ["octofriend"]),
         aiTool("Qoder", homes: ["~/.qoder", "~/.Qoder"], apps: ["Qoder"], caches: ["Qoder", "qoder"]),
         aiTool("Trae CN", homes: ["~/.trae-cn"], apps: ["Trae CN", "TRAE SOLO CN"], caches: ["Trae CN", "TRAE SOLO CN"]),
         aiTool("Windsurf", homes: ["~/.windsurf"], apps: ["Windsurf"], caches: ["Windsurf"]),
+        aiTool("Aide", homes: ["~/.aide"], apps: ["Aide"], caches: ["Aide"]),
+        aiTool("Void", homes: ["~/.void"], apps: ["Void"], caches: ["Void"]),
     ]
 
     private static func aiTool(
@@ -559,19 +567,41 @@ enum DevCacheScanner {
         homes: [String] = [],
         apps: [String] = [],
         caches: [String] = [],
-        explicit: [String] = [],
-        logs: [String] = []
+        safeExplicit: [String] = [],
+        cautiousExplicit: [String] = []
     ) -> AIDeveloperToolCacheSpec {
-        var patterns = explicit
-        patterns += homes.flatMap { home in aiCLITransientDirs.map { "\(home)/\($0)" } }
-        patterns += apps.flatMap { app in
-            aiElectronCacheDirs.map { "~/Library/Application Support/\(app)/\($0)" }
+        var targets = safeExplicit.map {
+            AIDeveloperToolCacheTarget(pattern: $0, risk: .safe)
         }
-        patterns += caches.flatMap { cache in
-            ["~/.cache/\(cache)", "~/Library/Caches/\(cache)"]
+        targets += cautiousExplicit.map {
+            AIDeveloperToolCacheTarget(pattern: $0, risk: .cautious)
         }
-        patterns += logs.map { "~/Library/Logs/\($0)" }
-        return AIDeveloperToolCacheSpec(toolName: toolName, patterns: patterns)
+        targets += apps.flatMap { app in
+            aiElectronCacheDirs.map {
+                AIDeveloperToolCacheTarget(
+                    pattern: "~/Library/Application Support/\(app)/\($0)",
+                    risk: .safe
+                )
+            }
+        }
+        targets += caches.map {
+            AIDeveloperToolCacheTarget(pattern: "~/Library/Caches/\($0)", risk: .safe)
+        }
+        return AIDeveloperToolCacheSpec(
+            toolName: toolName,
+            protectedRoots: homes,
+            targets: targets
+        )
+    }
+
+    static func fileIdentity(for url: URL) -> String {
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: resolved.path),
+           let device = attributes[.systemNumber] as? NSNumber,
+           let inode = attributes[.systemFileNumber] as? NSNumber {
+            return "\(device.uint64Value):\(inode.uint64Value)"
+        }
+        return resolved.path
     }
 
     private static let toolCaches: [(String, [String])] = [
@@ -611,14 +641,18 @@ enum DevCacheScanner {
     fileprivate static func scan(lang: String) -> [NativeScanItem] {
         var items: [NativeScanItem] = []
         var seenPaths: Set<String> = []
+        var seenFileIdentities: Set<String> = []
 
         func addUnique(_ item: NativeScanItem) {
             let path = item.pathString
+            let identity = fileIdentity(for: item.path)
             guard !seenPaths.contains(path) else { return }
+            guard !seenFileIdentities.contains(identity) else { return }
             if seenPaths.contains(where: { path.hasPrefix($0 + "/") || $0.hasPrefix(path + "/") }) {
                 return
             }
             seenPaths.insert(path)
+            seenFileIdentities.insert(identity)
             items.append(item)
         }
 
@@ -652,7 +686,7 @@ enum DevCacheScanner {
         for (toolName, dirName) in electronEditors {
             let base = appSupport.appendingPathComponent(dirName)
             guard FileManager.default.fileExists(atPath: base.path) else { continue }
-            for subdir in electronCacheDirs {
+            for subdir in editorCacheDirs {
                 let cacheURL = base.appendingPathComponent(subdir)
                 guard FileManager.default.fileExists(atPath: cacheURL.path) else { continue }
                 let size = NativeFileMetrics.itemSize(cacheURL)
@@ -702,24 +736,27 @@ enum DevCacheScanner {
         }
 
         for spec in aiDeveloperToolCaches {
-            for pattern in spec.patterns {
-                for url in NativePaths.expand(pattern) {
+            for target in spec.targets {
+                for url in NativePaths.expand(target.pattern) {
                     let size = NativeFileMetrics.itemSize(url)
                     guard size >= 100 * 1024 else { continue }
+                    let isSafe = target.risk == .safe
                     addUnique(
                         NativeScanItem(
                             path: url,
                             sizeBytes: size,
                             category: "dev_cache",
                             appName: spec.toolName,
-                            isSafe: true,
-                            selected: true,
+                            isSafe: isSafe,
+                            selected: isSafe,
                             lastModified: NativeFileMetrics.modifiedDate(url),
-                            description: NativeText.devToolCacheDescription(
-                                tool: spec.toolName,
-                                pathName: url.lastPathComponent,
-                                lang: lang
-                            )
+                            description: isSafe
+                                ? NativeText.devToolCacheDescription(
+                                    tool: spec.toolName,
+                                    pathName: url.lastPathComponent,
+                                    lang: lang
+                                )
+                                : NativeText.aiRuntimeCacheDescription(tool: spec.toolName, lang: lang)
                         )
                     )
                 }

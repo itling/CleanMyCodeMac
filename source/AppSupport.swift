@@ -498,6 +498,12 @@ enum NativeText {
         lang == "zh" ? "\(tool) 缓存：\(pathName)" : "\(tool) cache: \(pathName)"
     }
 
+    static func aiRuntimeCacheDescription(tool: String, lang: String) -> String {
+        lang == "zh"
+            ? "\(tool) 运行依赖缓存；删除后需要重新下载，建议退出应用后手动选择。"
+            : "\(tool) runtime dependencies; deleting requires a re-download. Quit the app and opt in manually."
+    }
+
     static func aiModelDescription(tool: String, name: String, lang: String) -> String {
         lang == "zh" ? "\(tool) 模型：\(name)" : "\(tool) model: \(name)"
     }

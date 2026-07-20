@@ -49,7 +49,7 @@ const UI = {
       system_cache: 'macOS 系统应用产生的临时缓存', app_cache: 'Chrome、VSCode 等 App 缓存',
       log: '7 天以上的崩溃报告与运行日志', download: '下载文件夹旧文件分析',
       large_file: '搜索 500MB 以上的大文件并分析占用', trash: '立即清空废纸篓释放空间',
-      dev_cache: 'Codex、Claude Code、Trae、Qoder 等 40+ AI 工具及开发缓存', document: '扫描主目录下的文档文件', media: '扫描主目录下的图片、音频、视频',
+      dev_cache: 'AI 工具与模型、IDE、语言依赖、构建产物、Git、Docker 等开发占用', document: '扫描主目录下的文档文件', media: '扫描主目录下的图片、音频、视频',
     },
   },
   en: {
@@ -101,7 +101,7 @@ const UI = {
       system_cache: 'Temporary cache from macOS system apps', app_cache: 'Cache from Chrome, VSCode, etc.',
       log: 'Crash reports and logs older than 7 days', download: 'Old files in Downloads folder',
       large_file: 'Search for files larger than 500MB', trash: 'Empty Trash to free space',
-      dev_cache: '40+ AI tools including Codex, Claude Code, Trae, and Qoder', document: 'Scan document files under Home', media: 'Scan images, audio and video under Home',
+      dev_cache: 'AI tools and models, IDEs, dependencies, build artifacts, Git, Docker, and more', document: 'Scan document files under Home', media: 'Scan images, audio and video under Home',
     },
   },
 };
