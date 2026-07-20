@@ -42,29 +42,27 @@ require_cmd() {
   fi
 }
 
-recreate_dmg_from_signed_app() {
+create_styled_dmg_from_signed_app() {
   local app_bundle="$1"
   local dmg_path="$2"
-  local stage_root
-  local volume_name="$APP_NAME"
+  local arch="${APP_ARCH:-}"
 
-  stage_root="$(mktemp -d "${TMPDIR:-/tmp}/cleanmycodemac-sign-XXXXXX")"
-  trap 'rm -rf "$stage_root"' RETURN
+  if [[ -z "$arch" && "$app_bundle" == "$PROJECT_DIR"/dist/*/"$APP_NAME".app ]]; then
+    arch="${app_bundle#"$PROJECT_DIR/dist/"}"
+    arch="${arch%%/*}"
+  fi
 
-  mkdir -p "$stage_root"
-  cp -R "$app_bundle" "$stage_root/"
-  ln -sfn /Applications "$stage_root/Applications"
-  rm -f "$dmg_path"
+  case "$arch" in
+    arm64|x86_64) ;;
+    *)
+      echo "Unable to determine app architecture for styled DMG packaging: ${arch:-<empty>}"
+      exit 1
+      ;;
+  esac
 
-  hdiutil create \
-    -volname "$volume_name" \
-    -srcfolder "$stage_root" \
-    -ov \
-    -format UDZO \
-    "$dmg_path"
-
-  rm -rf "$stage_root"
-  trap - RETURN
+  PACKAGE_APP_PATH="$app_bundle" \
+    PACKAGE_DMG_PATH="$dmg_path" \
+    bash "$PROJECT_DIR/build_dmg.sh" --package-only "$arch"
 }
 
 resolve_default_dmg_path() {
@@ -82,10 +80,8 @@ resolve_default_dmg_path() {
     inferred_arch="${APP_PATH#"$PROJECT_DIR/dist/"}"
     inferred_arch="${inferred_arch%%/*}"
     inferred_path="$PROJECT_DIR/dist/${APP_NAME}-${inferred_arch}.dmg"
-    if [[ -f "$inferred_path" ]]; then
-      echo "$inferred_path"
-      return 0
-    fi
+    echo "$inferred_path"
+    return 0
   fi
 
   shopt -s nullglob
@@ -176,10 +172,8 @@ if [[ "$USING_AD_HOC" == true ]]; then
   fi
 fi
 
-if [[ -f "$DMG_PATH" ]]; then
-  recreate_dmg_from_signed_app "$APP_PATH" "$DMG_PATH"
-  codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
-fi
+create_styled_dmg_from_signed_app "$APP_PATH" "$DMG_PATH"
+codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
 
 if [[ "$USING_AD_HOC" == true ]]; then
   echo "Ad-hoc signing complete. Apple notarization skipped."

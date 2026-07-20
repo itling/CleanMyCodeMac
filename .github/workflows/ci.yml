@@ -17,7 +17,7 @@ jobs:
           swift --version
 
       - name: Make scripts executable
-        run: chmod +x build_dmg.sh build_icon.sh run.command sign_and_notarize.sh
+        run: chmod +x build_dmg.sh build_icon.sh run.command sign_and_notarize.sh scripts/verify_dmg_layout.sh
 
       - name: Ensure app icon
         run: |
@@ -31,4 +31,14 @@ jobs:
         run: swift build
 
       - name: Build installable app bundle
-        run: ./build_dmg.sh arm64
+        run: ./build_dmg.sh --app-only arm64
+
+      - name: Apply ad-hoc signature and package styled DMG
+        env:
+          APP_PATH: ${{ github.workspace }}/dist/arm64/CleanMyCodeMac.app
+          DMG_PATH: ${{ github.workspace }}/dist/CleanMyCodeMac-arm64.dmg
+          APP_ARCH: arm64
+        run: ./sign_and_notarize.sh
+
+      - name: Verify styled DMG layout
+        run: scripts/verify_dmg_layout.sh "${{ github.workspace }}/dist/CleanMyCodeMac-arm64.dmg"

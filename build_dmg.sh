@@ -250,8 +250,33 @@ create_styled_dmg() {
   rm -f "$rw_dmg_path"
 }
 
+package_one_arch() {
+  local arch="$1"
+  local app_bundle="${PACKAGE_APP_PATH:-$DIST_ROOT/$arch/$APP_NAME.app}"
+  local dmg_path="${PACKAGE_DMG_PATH:-$DIST_ROOT/$APP_NAME-$arch.dmg}"
+  local dmg_staging_dir="$BUILD_ROOT/dmg-staging-$arch"
+
+  if [[ ! -d "$app_bundle" ]]; then
+    echo "App bundle not found for DMG packaging: $app_bundle"
+    exit 1
+  fi
+
+  rm -rf "$dmg_staging_dir"
+  mkdir -p "$dmg_staging_dir/.background"
+  ditto "$app_bundle" "$dmg_staging_dir/$APP_NAME.app"
+  ln -sfn /Applications "$dmg_staging_dir/Applications"
+  create_dmg_background "$dmg_staging_dir/.background/background.png"
+
+  echo "Creating styled .dmg ($arch)..."
+  create_styled_dmg "$arch" "$dmg_staging_dir" "$dmg_path"
+  rm -rf "$dmg_staging_dir"
+
+  echo "DMG: $dmg_path"
+}
+
 build_one_arch() {
   local arch="$1"
+  local package_dmg="$2"
   local scratch_dir="$BUILD_ROOT/swift-$arch"
   local dist_dir="$DIST_ROOT/$arch"
   local app_bundle="$dist_dir/$APP_NAME.app"
@@ -259,7 +284,6 @@ build_one_arch() {
   local macos_dir="$contents_dir/MacOS"
   local frameworks_dir="$contents_dir/Frameworks"
   local resources_dir="$contents_dir/Resources"
-  local dmg_staging_dir="$dist_dir/dmg"
   local dmg_name="${APP_NAME}-${arch}.dmg"
   local dmg_path="$DIST_ROOT/$dmg_name"
 
@@ -309,18 +333,11 @@ build_one_arch() {
   cp -R "$UI_DIR/." "$resources_dir/ui/"
   create_info_plist "$contents_dir/Info.plist" "$arch"
 
-  mkdir -p "$dmg_staging_dir"
-  cp -R "$app_bundle" "$dmg_staging_dir/"
-  ln -sfn /Applications "$dmg_staging_dir/Applications"
-  mkdir -p "$dmg_staging_dir/.background"
-  create_dmg_background "$dmg_staging_dir/.background/background.png"
-
-  echo "Creating .dmg ($arch)..."
-  create_styled_dmg "$arch" "$dmg_staging_dir" "$dmg_path"
-
-  echo "Build complete ($arch):"
+  echo "App build complete ($arch):"
   echo "APP: $app_bundle"
-  echo "DMG: $dmg_path"
+  if [[ "$package_dmg" == true ]]; then
+    package_one_arch "$arch"
+  fi
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -328,12 +345,26 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-require_cmd hdiutil
-require_cmd xattr
-require_cmd osascript
 require_cmd ditto
 
-if [[ ! -f "$DMG_BACKGROUND_GENERATOR" ]]; then
+MODE="build-and-package"
+case "${1:-}" in
+  --app-only)
+    MODE="app-only"
+    shift
+    ;;
+  --package-only)
+    MODE="package-only"
+    shift
+    ;;
+esac
+
+if [[ "$MODE" != "app-only" ]]; then
+  require_cmd hdiutil
+  require_cmd osascript
+fi
+
+if [[ "$MODE" != "app-only" && ! -f "$DMG_BACKGROUND_GENERATOR" ]]; then
   echo "DMG background generator not found: $DMG_BACKGROUND_GENERATOR"
   exit 1
 fi
@@ -373,5 +404,15 @@ for arch in "${ARCHS[@]}"; do
     continue
   fi
   SEEN_ARCHS="$SEEN_ARCHS $arch"
-  build_one_arch "$arch"
+  case "$MODE" in
+    app-only)
+      build_one_arch "$arch" false
+      ;;
+    package-only)
+      package_one_arch "$arch"
+      ;;
+    *)
+      build_one_arch "$arch" true
+      ;;
+  esac
 done

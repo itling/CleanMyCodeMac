@@ -33,7 +33,7 @@ jobs:
           swift --version
 
       - name: Make scripts executable
-        run: chmod +x build_dmg.sh build_icon.sh sign_and_notarize.sh
+        run: chmod +x build_dmg.sh build_icon.sh sign_and_notarize.sh scripts/verify_dmg_layout.sh
 
       - name: Validate Sparkle signing configuration
         env:
@@ -60,11 +60,11 @@ jobs:
 
           ./build_icon.sh
 
-      - name: Build DMG
+      - name: Build app bundle
         env:
           APP_VERSION: ${{ github.ref_name }}
           SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
-        run: ./build_dmg.sh ${{ matrix.arch }}
+        run: ./build_dmg.sh --app-only ${{ matrix.arch }}
 
       - name: Import Developer ID certificate
         env:
@@ -97,12 +97,16 @@ jobs:
         env:
           APP_PATH: ${{ github.workspace }}/dist/${{ matrix.arch }}/CleanMyCodeMac.app
           DMG_PATH: ${{ github.workspace }}/dist/CleanMyCodeMac-${{ matrix.arch }}.dmg
+          APP_ARCH: ${{ matrix.arch }}
           DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
         run: |
           ./sign_and_notarize.sh
+
+      - name: Verify styled DMG layout
+        run: scripts/verify_dmg_layout.sh "${{ github.workspace }}/dist/CleanMyCodeMac-${{ matrix.arch }}.dmg"
 
       - name: Verify packaged app launches
         env:
