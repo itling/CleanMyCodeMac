@@ -1,6 +1,18 @@
 import Darwin
 import Foundation
 
+enum NativeScanPresentation: Equatable {
+    case stored
+    case developerCache(tool: String)
+    case aiRuntimeCache(tool: String)
+    case aiModel(tool: String)
+    case projectArtifact(tool: String)
+    case gitRepository
+    case dockerData
+    case aiToolLog
+    case systemTemporary(ageDays: Int)
+}
+
 struct NativeScanItem {
     let path: URL
     let sizeBytes: Int64
@@ -10,6 +22,29 @@ struct NativeScanItem {
     var selected: Bool
     let lastModified: Date?
     let description: String
+    let presentation: NativeScanPresentation
+
+    init(
+        path: URL,
+        sizeBytes: Int64,
+        category: String,
+        appName: String,
+        isSafe: Bool,
+        selected: Bool,
+        lastModified: Date?,
+        description: String,
+        presentation: NativeScanPresentation = .stored
+    ) {
+        self.path = path
+        self.sizeBytes = sizeBytes
+        self.category = category
+        self.appName = appName
+        self.isSafe = isSafe
+        self.selected = selected
+        self.lastModified = lastModified
+        self.description = description
+        self.presentation = presentation
+    }
 
     var pathString: String { path.path }
     var sizeDisplay: String { NativeFormat.size(sizeBytes) }
@@ -21,7 +56,7 @@ struct NativeScanItem {
             || (category == "dev_cache" && NativeFileMetrics.isDirectory(path))
     }
     var canClean: Bool {
-        !(category == "dev_cache" && ["Git 仓库", "Git Repositories"].contains(appName))
+        presentation != .gitRepository
     }
 }
 
@@ -467,7 +502,8 @@ enum LogsScanner {
                     lastModified: modified,
                     description: isAILog
                         ? NativeText.aiToolLogDescription(date: NativeFormat.date(modified), lang: lang)
-                        : NativeText.logDescription(date: NativeFormat.date(modified), lang: lang)
+                        : NativeText.logDescription(date: NativeFormat.date(modified), lang: lang),
+                    presentation: isAILog ? .aiToolLog : .stored
                 )
             )
         }
@@ -522,7 +558,8 @@ enum SystemTemporaryFilesScanner {
                     date: NativeFormat.date(modified),
                     ageDays: ageDays,
                     lang: lang
-                )
+                ),
+                presentation: .systemTemporary(ageDays: ageDays)
             )
         }
         .sorted { $0.sizeBytes > $1.sizeBytes }
@@ -783,7 +820,8 @@ enum DevCacheScanner {
                                 langName: langName,
                                 pathName: url.lastPathComponent,
                                 lang: lang
-                            )
+                            ),
+                            presentation: .developerCache(tool: langName)
                         )
                     )
                 }
@@ -813,7 +851,8 @@ enum DevCacheScanner {
                             tool: toolName,
                             pathName: cacheURL.lastPathComponent,
                             lang: lang
-                        )
+                        ),
+                        presentation: .developerCache(tool: toolName)
                     )
                 )
             }
@@ -837,7 +876,8 @@ enum DevCacheScanner {
                                 tool: toolName,
                                 pathName: url.lastPathComponent,
                                 lang: lang
-                            )
+                            ),
+                            presentation: .developerCache(tool: toolName)
                         )
                     )
                 }
@@ -865,7 +905,10 @@ enum DevCacheScanner {
                                     pathName: url.lastPathComponent,
                                     lang: lang
                                 )
-                                : NativeText.aiRuntimeCacheDescription(tool: spec.toolName, lang: lang)
+                                : NativeText.aiRuntimeCacheDescription(tool: spec.toolName, lang: lang),
+                            presentation: isSafe
+                                ? .developerCache(tool: spec.toolName)
+                                : .aiRuntimeCache(tool: spec.toolName)
                         )
                     )
                 }
@@ -899,7 +942,8 @@ enum DevCacheScanner {
                             tool: toolName,
                             pathName: entry.lastPathComponent,
                             lang: lang
-                        )
+                        ),
+                        presentation: .developerCache(tool: toolName)
                     )
                 )
             }
@@ -919,7 +963,8 @@ enum DevCacheScanner {
                         tool: toolName,
                         pathName: cacheURL.lastPathComponent,
                         lang: lang
-                    )
+                    ),
+                    presentation: .developerCache(tool: toolName)
                 )
             )
         }
@@ -934,7 +979,8 @@ enum DevCacheScanner {
                     isSafe: false,
                     selected: false,
                     lastModified: NativeFileMetrics.modifiedDate(repository.url),
-                    description: NativeText.gitRepositoryDescription(path: repository.url.path, lang: lang)
+                    description: NativeText.gitRepositoryDescription(path: repository.url.path, lang: lang),
+                    presentation: .gitRepository
                 )
             )
         }
@@ -951,7 +997,8 @@ enum DevCacheScanner {
                     isSafe: artifact.isSafe,
                     selected: artifact.selected,
                     lastModified: NativeFileMetrics.modifiedDate(artifact.url),
-                    description: artifact.description
+                    description: artifact.description,
+                    presentation: .projectArtifact(tool: artifact.toolName)
                 )
             )
         }
@@ -968,7 +1015,8 @@ enum DevCacheScanner {
                     isSafe: false,
                     selected: false,
                     lastModified: NativeFileMetrics.modifiedDate(dockerURL),
-                    description: NativeText.dockerDataDescription(lang: lang)
+                    description: NativeText.dockerDataDescription(lang: lang),
+                    presentation: .dockerData
                 )
             )
         }
@@ -991,7 +1039,8 @@ enum DevCacheScanner {
                                 tool: toolName,
                                 name: url.lastPathComponent,
                                 lang: lang
-                            )
+                            ),
+                            presentation: .aiModel(tool: toolName)
                         )
                     )
                 }
@@ -1672,7 +1721,16 @@ final class NativeScanEngine: @unchecked Sendable {
         items.first(where: { !$0.isSafe }) ?? items.first
     }
 
-    private func localizedAppName(for item: NativeScanItem, lang: String) -> String {
+    static func localizedAppName(for item: NativeScanItem, lang: String) -> String {
+        switch item.presentation {
+        case .gitRepository:
+            return NativeText.gitRepositoriesName(lang: lang)
+        case .systemTemporary(let ageDays):
+            return NativeText.systemTemporaryGroup(ageDays: ageDays, lang: lang)
+        default:
+            break
+        }
+
         switch item.category {
         case "download":
             return NativeText.downloadGroupName(for: item.path.pathExtension.lowercased(), lang: lang)
@@ -1687,8 +1745,45 @@ final class NativeScanEngine: @unchecked Sendable {
         }
     }
 
-    private func localizedDescription(for item: NativeScanItem, lang: String) -> String {
+    static func localizedDescription(for item: NativeScanItem, lang: String) -> String {
         let dateText = item.lastModified.map(NativeFormat.date)
+
+        switch item.presentation {
+        case .stored:
+            break
+        case .developerCache(let tool):
+            return NativeText.devToolCacheDescription(
+                tool: tool,
+                pathName: item.path.lastPathComponent,
+                lang: lang
+            )
+        case .aiRuntimeCache(let tool):
+            return NativeText.aiRuntimeCacheDescription(tool: tool, lang: lang)
+        case .aiModel(let tool):
+            return NativeText.aiModelDescription(
+                tool: tool,
+                name: item.path.lastPathComponent,
+                lang: lang
+            )
+        case .projectArtifact(let tool):
+            return NativeText.projectArtifactDescription(
+                tool: tool,
+                pathName: item.path.lastPathComponent,
+                lang: lang
+            )
+        case .gitRepository:
+            return NativeText.gitRepositoryDescription(path: item.path.path, lang: lang)
+        case .dockerData:
+            return NativeText.dockerDataDescription(lang: lang)
+        case .aiToolLog:
+            return NativeText.aiToolLogDescription(date: dateText ?? "", lang: lang)
+        case .systemTemporary(let ageDays):
+            return NativeText.systemTemporaryDescription(
+                date: dateText ?? "",
+                ageDays: ageDays,
+                lang: lang
+            )
+        }
 
         switch item.category {
         case "download":
@@ -1730,7 +1825,7 @@ final class NativeScanEngine: @unchecked Sendable {
         let groupedByCategory = Dictionary(grouping: items, by: \.category)
 
         for (category, categoryItems) in groupedByCategory {
-            let groupedByApp = Dictionary(grouping: categoryItems) { localizedAppName(for: $0, lang: lang) }
+            let groupedByApp = Dictionary(grouping: categoryItems) { Self.localizedAppName(for: $0, lang: lang) }
             let subGroups: [[String: Any]] = groupedByApp
                 .map { appName, appItems in
                     let cleanableItems = appItems.filter(\.canClean)
@@ -1750,7 +1845,7 @@ final class NativeScanEngine: @unchecked Sendable {
                             "is_safe": item.isSafe,
                             "can_analyze": item.canAnalyze,
                             "can_clean": item.canClean,
-                            "description": localizedDescription(for: item, lang: lang),
+                            "description": Self.localizedDescription(for: item, lang: lang),
                         ]
                     }
 
@@ -1804,7 +1899,7 @@ final class NativeScanEngine: @unchecked Sendable {
     private func groupDescription(items: [NativeScanItem], lang: String) -> String {
         guard items.count > 1 else {
             if let item = items.first {
-                return localizedDescription(for: item, lang: lang)
+                return Self.localizedDescription(for: item, lang: lang)
             }
             return ""
         }
