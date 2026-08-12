@@ -367,15 +367,29 @@ private enum AppCacheScanner {
     }
 }
 
-private enum LogsScanner {
+enum LogsScanner {
     private static let logExtensions: Set<String> = ["log", "ips", "diag", "crash", "spin", "hang"]
+    private static let aiToolMarkers: Set<String> = [
+        "aide", "amp", "antigravity", "claude", "claude-code", "cline", "codebuddy",
+        "codebuddy-cn", "codebuff", "codex", "command-code", "copilot", "crush", "devin",
+        "droid", "factory-droid", "gajae-code", "gemini", "gemini-cli", "github-copilot",
+        "goose", "grok", "hermes", "jcode", "junie", "kilo", "kilo-cli", "kimi",
+        "kimi-cli", "kiro", "mimo-code", "mux", "octofriend", "openai-codex", "openclaw",
+        "opencode", "opencodereview", "pi", "qoder", "qwen", "qwen-cli", "roo",
+        "roo-code", "synthetic", "trae", "trae-cn", "trae-solo", "void", "windsurf",
+        "workbuddy", "warp", "zcode",
+    ]
 
     static func scan(lang: String) -> [NativeScanItem] {
         let roots = [
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs"),
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports"),
         ]
-        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        return scan(roots: roots, now: Date(), lang: lang)
+    }
+
+    static func scan(roots: [URL], now: Date, lang: String) -> [NativeScanItem] {
+        let cutoff = now.addingTimeInterval(-7 * 24 * 60 * 60)
         var seen: Set<String> = []
         var items: [NativeScanItem] = []
 
@@ -384,6 +398,24 @@ private enum LogsScanner {
         }
 
         return items.sorted { $0.sizeBytes > $1.sizeBytes }
+    }
+
+    static func isAIDeveloperToolLog(_ url: URL) -> Bool {
+        let components = url.deletingPathExtension().pathComponents.map(slug)
+        return components.contains { component in
+            aiToolMarkers.contains { marker in
+                component == marker
+                    || component.hasPrefix(marker + "-")
+                    || component.hasSuffix("-" + marker)
+                    || component.contains("-" + marker + "-")
+            }
+        }
+    }
+
+    private static func slug(_ value: String) -> String {
+        value.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .joined(separator: "-")
     }
 
     private static func scanDirectory(
@@ -423,16 +455,19 @@ private enum LogsScanner {
 
             let appName = entry.lastPathComponent.split(separator: "_").first.map(String.init)
                 ?? entry.deletingPathExtension().lastPathComponent
+            let isAILog = isAIDeveloperToolLog(entry)
             items.append(
                 NativeScanItem(
                     path: entry,
                     sizeBytes: size,
                     category: "log",
                     appName: appName,
-                    isSafe: true,
-                    selected: true,
+                    isSafe: !isAILog,
+                    selected: !isAILog,
                     lastModified: modified,
-                    description: NativeText.logDescription(date: NativeFormat.date(modified), lang: lang)
+                    description: isAILog
+                        ? NativeText.aiToolLogDescription(date: NativeFormat.date(modified), lang: lang)
+                        : NativeText.logDescription(date: NativeFormat.date(modified), lang: lang)
                 )
             )
         }

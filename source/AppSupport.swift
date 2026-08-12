@@ -486,6 +486,12 @@ enum NativeText {
         lang == "zh" ? "旧日志（\(date)）" : "Old log (\(date))"
     }
 
+    static func aiToolLogDescription(date: String, lang: String) -> String {
+        lang == "zh"
+            ? "AI 编程工具会话日志（\(date)），可能包含对话或排障信息"
+            : "AI coding tool session log (\(date)); may contain conversation or diagnostic data"
+    }
+
     static func systemTemporaryGroup(ageDays: Int, lang: String) -> String {
         if ageDays >= 30 {
             return lang == "zh" ? "30 天以上" : "30+ days old"
