@@ -17,6 +17,12 @@ test('scan scopes replace Trash with System Temporary Files', () => {
   assert.match(appSource, /system_temp: 'System Temporary Files'/);
 });
 
+test('system temporary files scope explains the default selection and recovery behavior', () => {
+  assert.match(appSource, /system_temp: '扫描系统临时文件，7 天以上默认勾选，清理后移入废纸篓'/);
+  assert.match(appSource, /system_temp: 'Scan system temporary files; items older than 7 days are selected by default and moved to Trash when cleaned'/);
+  assert.doesNotMatch(appSource, /system_temp: '展示 \/private\/tmp/);
+});
+
 test('trash-specific permanent deletion UI is removed', () => {
   assert.doesNotMatch(appSource, /confirmCleanTrash/);
   assert.doesNotMatch(appSource, /scan\.trash/);

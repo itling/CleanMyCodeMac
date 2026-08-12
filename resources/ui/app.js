@@ -47,7 +47,7 @@ const UI = {
     catDesc: {
       system_cache: 'macOS 系统应用产生的临时缓存', app_cache: 'Chrome、VSCode 等 App 缓存',
       log: '7 天以上的崩溃报告与运行日志', download: '下载文件夹旧文件分析',
-      large_file: '搜索 500MB 以上的大文件并分析占用', system_temp: '展示 /private/tmp 下的临时项目，由你判断是否清理',
+      large_file: '搜索 500MB 以上的大文件并分析占用', system_temp: '扫描系统临时文件，7 天以上默认勾选，清理后移入废纸篓',
       dev_cache: 'AI 工具与模型、IDE、语言依赖、构建产物、Git、Docker 等开发占用', document: '扫描主目录下的文档文件', media: '扫描主目录下的图片、音频、视频',
     },
   },
@@ -98,7 +98,7 @@ const UI = {
     catDesc: {
       system_cache: 'Temporary cache from macOS system apps', app_cache: 'Cache from Chrome, VSCode, etc.',
       log: 'Crash reports and logs older than 7 days', download: 'Old files in Downloads folder',
-      large_file: 'Search for files larger than 500MB', system_temp: 'Show temporary items under /private/tmp for you to review',
+      large_file: 'Search for files larger than 500MB', system_temp: 'Scan system temporary files; items older than 7 days are selected by default and moved to Trash when cleaned',
       dev_cache: 'AI tools and models, IDEs, dependencies, build artifacts, Git, Docker, and more', document: 'Scan document files under Home', media: 'Scan images, audio and video under Home',
     },
   },
