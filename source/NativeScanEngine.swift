@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-private struct NativeScanItem {
+struct NativeScanItem {
     let path: URL
     let sizeBytes: Int64
     let category: String
@@ -17,6 +17,7 @@ private struct NativeScanItem {
     var canAnalyze: Bool {
         category == "large_file"
             || appName == "Docker"
+            || (category == "system_temp" && NativeFileMetrics.isDirectory(path))
             || (category == "dev_cache" && NativeFileMetrics.isDirectory(path))
     }
     var canClean: Bool {
@@ -435,6 +436,79 @@ private enum LogsScanner {
                 )
             )
         }
+    }
+}
+
+enum SystemTemporaryFilesScanner {
+    static let defaultRoot = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+    private static let selectedAge: TimeInterval = 7 * 86_400
+    private static let recommendedAge: TimeInterval = 30 * 86_400
+
+    static func scan(lang: String) -> [NativeScanItem] {
+        scan(root: defaultRoot, now: Date(), lang: lang)
+    }
+
+    static func scan(
+        root: URL,
+        now: Date,
+        lang: String
+    ) -> [NativeScanItem] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [
+                .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
+                .contentModificationDateKey,
+            ],
+            options: []
+        ) else {
+            return []
+        }
+
+        return entries.compactMap { entry in
+            guard isEligible(entry, root: root) else {
+                return nil
+            }
+            let modified = NativeFileMetrics.modifiedDate(entry) ?? .distantFuture
+            let age = max(now.timeIntervalSince(modified), 0)
+            let ageDays = Int(age / 86_400)
+            let size = NativeFileMetrics.itemSize(entry)
+            let selected = age >= selectedAge
+            let recommended = age >= recommendedAge
+
+            return NativeScanItem(
+                path: entry,
+                sizeBytes: size,
+                category: "system_temp",
+                appName: NativeText.systemTemporaryGroup(ageDays: ageDays, lang: lang),
+                isSafe: recommended,
+                selected: selected,
+                lastModified: modified,
+                description: NativeText.systemTemporaryDescription(
+                    date: NativeFormat.date(modified),
+                    ageDays: ageDays,
+                    lang: lang
+                )
+            )
+        }
+        .sorted { $0.sizeBytes > $1.sizeBytes }
+    }
+
+    static func isEligible(
+        _ url: URL,
+        root: URL = defaultRoot
+    ) -> Bool {
+        let standardizedRoot = root.standardizedFileURL.path
+        let standardizedURL = url.standardizedFileURL
+        guard standardizedURL.deletingLastPathComponent().path == standardizedRoot else { return false }
+        guard let values = try? url.resourceValues(forKeys: [
+            .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
+            .contentModificationDateKey,
+        ]) else {
+            return false
+        }
+        guard values.isSymbolicLink != true else { return false }
+        guard values.isRegularFile == true || values.isDirectory == true else { return false }
+        return true
     }
 }
 
@@ -1014,65 +1088,6 @@ enum DevCacheScanner {
     }
 }
 
-private enum TrashScanner {
-    static func scan(lang: String) -> [NativeScanItem] {
-        var items: [NativeScanItem] = []
-        var permissionDenied = false
-
-        for trashURL in NativePaths.trashLocations() {
-            guard FileManager.default.fileExists(atPath: trashURL.path) else { continue }
-            do {
-                let entries = try FileManager.default.contentsOfDirectory(
-                    at: trashURL,
-                    includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-                    options: [.skipsHiddenFiles]
-                )
-                if entries.isEmpty {
-                    continue
-                }
-
-                let isMainTrash = trashURL.path.hasSuffix("/.Trash")
-                let volumeName = isMainTrash ? nil : trashURL.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
-
-                for entry in entries {
-                    items.append(
-                        NativeScanItem(
-                            path: entry,
-                            sizeBytes: NativeFileMetrics.itemSize(entry),
-                            category: "trash",
-                            appName: entry.lastPathComponent,
-                            isSafe: true,
-                            selected: true,
-                            lastModified: NativeFileMetrics.modifiedDate(entry),
-                            description: NativeText.trashLabel(volume: volumeName, lang: lang)
-                        )
-                    )
-                }
-            } catch {
-                permissionDenied = true
-            }
-        }
-
-        if items.isEmpty && permissionDenied {
-            let placeholder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
-            items.append(
-                NativeScanItem(
-                    path: placeholder,
-                    sizeBytes: 0,
-                    category: "trash",
-                    appName: NativeText.trashNoAccessLabel(lang: lang),
-                    isSafe: false,
-                    selected: false,
-                    lastModified: nil,
-                    description: NativeText.trashNoAccessDescription(lang: lang)
-                )
-            )
-        }
-
-        return items.sorted { $0.sizeBytes > $1.sizeBytes }
-    }
-}
-
 final class NativeScanEngine: @unchecked Sendable {
     private let lock = NSLock()
     private let queue = DispatchQueue(label: "CleanMyCodeMac.native.scan", qos: .userInitiated)
@@ -1084,7 +1099,7 @@ final class NativeScanEngine: @unchecked Sendable {
 
     func startScan(categories: [String], lang: String) {
         let requested = categories.isEmpty
-            ? ["system_cache", "app_cache", "log", "download", "large_file", "trash", "dev_cache", "document", "media"]
+            ? ["system_cache", "app_cache", "log", "download", "large_file", "system_temp", "dev_cache", "document", "media"]
             : categories
         lock.lock()
         items = []
@@ -1167,6 +1182,7 @@ final class NativeScanEngine: @unchecked Sendable {
 
         var freed: Int64 = 0
         var errors = 0
+        var cleanedPaths: Set<String> = []
 
         lock.lock()
         let grouped = Dictionary(grouping: items.filter { pathSet.contains($0.pathString) }, by: { $0.pathString })
@@ -1183,16 +1199,25 @@ final class NativeScanEngine: @unchecked Sendable {
                 continue
             }
             do {
-                if item.category == "trash" || item.isSafe {
+                if item.category == "system_temp" {
+                    guard SystemTemporaryFilesScanner.isEligible(item.path) else {
+                        errors += 1
+                        continue
+                    }
+                    _ = try FileManager.default.trashItem(at: item.path, resultingItemURL: nil)
+                } else if item.isSafe {
                     try FileManager.default.removeItem(at: item.path)
                 } else {
                     _ = try FileManager.default.trashItem(at: item.path, resultingItemURL: nil)
                 }
                 freed += item.sizeBytes
+                cleanedPaths.insert(item.pathString)
             } catch {
                 do {
+                    guard item.category != "system_temp" else { throw error }
                     _ = try FileManager.default.trashItem(at: item.path, resultingItemURL: nil)
                     freed += item.sizeBytes
+                    cleanedPaths.insert(item.pathString)
                 } catch {
                     errors += 1
                 }
@@ -1200,7 +1225,7 @@ final class NativeScanEngine: @unchecked Sendable {
         }
 
         lock.lock()
-        items.removeAll { pathSet.contains($0.pathString) }
+        items.removeAll { cleanedPaths.contains($0.pathString) }
         lock.unlock()
 
         return [
@@ -1470,7 +1495,7 @@ final class NativeScanEngine: @unchecked Sendable {
     private func runScan(categories: [String], lang: String) {
         let supported = Set([
             "system_cache", "app_cache", "log", "download", "large_file",
-            "trash", "dev_cache", "document", "media",
+            "system_temp", "dev_cache", "document", "media",
         ])
         let total = max(categories.count, 1)
         var completed = 0
@@ -1498,8 +1523,8 @@ final class NativeScanEngine: @unchecked Sendable {
                     result = DownloadsScanner.scan(lang: lang)
                 case "large_file":
                     result = LargeFilesScanner.scan(lang: lang)
-                case "trash":
-                    result = TrashScanner.scan(lang: lang)
+                case "system_temp":
+                    result = SystemTemporaryFilesScanner.scan(lang: lang)
                 case "dev_cache":
                     result = DevCacheScanner.scan(lang: lang)
                 case "document":
@@ -1544,7 +1569,7 @@ final class NativeScanEngine: @unchecked Sendable {
         case "log": return "scan.log"
         case "download": return "scan.download"
         case "large_file": return "scan.large_file"
-        case "trash": return "scan.trash"
+        case "system_temp": return "scan.system_temp"
         case "dev_cache": return "scan.dev_cache"
         case "document": return "scan.document"
         case "media": return "scan.media"
@@ -1609,7 +1634,7 @@ final class NativeScanEngine: @unchecked Sendable {
     }
 
     private func representativeItem(from items: [NativeScanItem]) -> NativeScanItem? {
-        items.first(where: { $0.category == "trash" }) ?? items.first(where: { !$0.isSafe }) ?? items.first
+        items.first(where: { !$0.isSafe }) ?? items.first
     }
 
     private func localizedAppName(for item: NativeScanItem, lang: String) -> String {
@@ -1658,10 +1683,7 @@ final class NativeScanEngine: @unchecked Sendable {
             return NativeText.logDescription(date: dateText ?? "", lang: lang)
         case "dev_cache":
             return item.description
-        case "trash":
-            if item.sizeBytes == 0 {
-                return NativeText.trashNoAccessDescription(lang: lang)
-            }
+        case "system_temp":
             return item.description
         default:
             return item.description

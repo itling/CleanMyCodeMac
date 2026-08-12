@@ -7,13 +7,13 @@ const UI = {
     scopeTitle: '扫描范围', scopeSummary: '已选择 {n} / {t} 项',
     scanning: '正在扫描...', initializing: '初始化中...', scopeLabel: '范围',
     scanDone: '已完成：{name}', scanError: '{name} 扫描出错',
-    scanKeys: {'ui.init':'初始化中...','scan.system_cache':'正在扫描系统缓存...','scan.app_cache':'正在扫描应用缓存...','scan.log':'正在扫描日志文件...','scan.download':'正在分析下载文件夹...','scan.large_file':'正在搜索大文件...','scan.trash':'正在检查废纸篓...','scan.dev_cache':'正在扫描 AI 编程工具与开发缓存...','scan.ai_models':'正在扫描大模型文件...','scan.document':'正在扫描文档文件...','scan.media':'正在扫描媒体文件...','scan.done':'已完成：{name}','scan.error':'{name} 扫描出错'},
+    scanKeys: {'ui.init':'初始化中...','scan.system_cache':'正在扫描系统缓存...','scan.app_cache':'正在扫描应用缓存...','scan.log':'正在扫描日志文件...','scan.download':'正在分析下载文件夹...','scan.large_file':'正在搜索大文件...','scan.system_temp':'正在扫描系统临时文件...','scan.dev_cache':'正在扫描 AI 编程工具与开发缓存...','scan.ai_models':'正在扫描大模型文件...','scan.document':'正在扫描文档文件...','scan.media':'正在扫描媒体文件...','scan.done':'已完成：{name}','scan.error':'{name} 扫描出错'},
     foundFiles: '共发现可清理文件', selectedJunk: '已选择垃圾',
     back: '返回', selectResult: '全选结果', deselectResult: '取消全选', cleanNow: '立即清理',
     cleaning: '清理中...', cleanDone: '清理完成', cleanFreed: '清理完成，释放了 {size}', cleanError: '清理失败，请稍后重试。',
     cleanFailed: '{n} 个项目失败',
     permOk: '&#10003; 完全磁盘访问已授权', permWarn: '&#9888; 未授权完全磁盘访问',
-    permTrashWarn: '废纸篓访问未授权', permPartialWarn: '部分受保护目录未授权',
+    permPartialWarn: '部分受保护目录未授权',
     permOpen: '打开授权设置',
     diskAvailable: '可用', diskReclaimable: '系统可清除',
     badgeClean: '很干净', badgeSafe: '建议清理', badgeWarn: '谨慎清理',
@@ -38,17 +38,16 @@ const UI = {
     updateAvailable: '发现新版本 {version}', updateStarted: '正在准备 {version}，请按提示完成更新。', updateStartFailed: '暂时无法启动更新，请稍后重试。',
     alertNoScope: '请至少勾选一个扫描范围', alertNoScopeTitle: '扫描范围为空',
     alertNoItem: '请先勾选要清理的项目', alertNoItemTitle: '未选择项目',
-    confirmClean: '即将清理 {n} 个项目。\n缓存/日志等安全项目将直接删除并释放磁盘空间；文档/媒体等项目将移入废纸篓（可恢复）。确认继续？', confirmCleanTitle: '确认清理',
-    confirmCleanTrash: '即将永久删除 {n} 个废纸篓项目。\n删除后不可恢复，确认继续？', confirmCleanTrashTitle: '确认永久删除',
+    confirmClean: '即将清理 {n} 个项目。\n缓存/日志等安全项目将直接删除；系统临时文件、文档和媒体将移入废纸篓（可恢复）。确认继续？', confirmCleanTitle: '确认清理',
     catName: {
       system_cache: '系统垃圾', app_cache: '应用垃圾', log: '日志文件',
-      download: '下载文件', large_file: '大文件', trash: '废纸篓',
+      download: '下载文件', large_file: '大文件', system_temp: '系统临时文件',
       dev_cache: '编程缓存', document: '文档文件', media: '媒体文件',
     },
     catDesc: {
       system_cache: 'macOS 系统应用产生的临时缓存', app_cache: 'Chrome、VSCode 等 App 缓存',
       log: '7 天以上的崩溃报告与运行日志', download: '下载文件夹旧文件分析',
-      large_file: '搜索 500MB 以上的大文件并分析占用', trash: '立即清空废纸篓释放空间',
+      large_file: '搜索 500MB 以上的大文件并分析占用', system_temp: '展示 /private/tmp 下的临时项目，由你判断是否清理',
       dev_cache: 'AI 工具与模型、IDE、语言依赖、构建产物、Git、Docker 等开发占用', document: '扫描主目录下的文档文件', media: '扫描主目录下的图片、音频、视频',
     },
   },
@@ -59,13 +58,13 @@ const UI = {
     scopeTitle: 'Scan Scope', scopeSummary: '{n} / {t} selected',
     scanning: 'Scanning...', initializing: 'Initializing...', scopeLabel: 'Scope',
     scanDone: 'Done: {name}', scanError: '{name} scan error',
-    scanKeys: {'ui.init':'Initializing...','scan.system_cache':'Scanning system cache...','scan.app_cache':'Scanning app cache...','scan.log':'Scanning log files...','scan.download':'Analyzing downloads folder...','scan.large_file':'Searching large files...','scan.trash':'Checking trash...','scan.dev_cache':'Scanning AI coding tools and developer caches...','scan.ai_models':'Scanning AI model files...','scan.document':'Scanning document files...','scan.media':'Scanning media files...','scan.done':'Done: {name}','scan.error':'{name} scan error'},
+    scanKeys: {'ui.init':'Initializing...','scan.system_cache':'Scanning system cache...','scan.app_cache':'Scanning app cache...','scan.log':'Scanning log files...','scan.download':'Analyzing downloads folder...','scan.large_file':'Searching large files...','scan.system_temp':'Scanning system temporary files...','scan.dev_cache':'Scanning AI coding tools and developer caches...','scan.ai_models':'Scanning AI model files...','scan.document':'Scanning document files...','scan.media':'Scanning media files...','scan.done':'Done: {name}','scan.error':'{name} scan error'},
     foundFiles: 'Cleanable files found', selectedJunk: 'Selected',
     back: 'Back', selectResult: 'Select All', deselectResult: 'Deselect All', cleanNow: 'Clean Now',
     cleaning: 'Cleaning...', cleanDone: 'Clean Complete', cleanFreed: 'Cleaned, freed {size}', cleanError: 'Clean failed. Please try again.',
     cleanFailed: '{n} items failed',
     permOk: '&#10003; Full Disk Access granted', permWarn: '&#9888; Full Disk Access not granted',
-    permTrashWarn: 'Trash access not granted', permPartialWarn: 'Protected folders partially not granted',
+    permPartialWarn: 'Protected folders partially not granted',
     permOpen: 'Open Settings',
     diskAvailable: 'Available', diskReclaimable: 'System reclaimable',
     badgeClean: 'Clean', badgeSafe: 'Safe to clean', badgeWarn: 'Use caution',
@@ -90,17 +89,16 @@ const UI = {
     updateAvailable: 'New version {version} is available', updateStarted: 'Preparing {version}. Follow the update prompt to finish.', updateStartFailed: 'Unable to start the update. Please try again.',
     alertNoScope: 'Please select at least one scan scope', alertNoScopeTitle: 'No Scope Selected',
     alertNoItem: 'Please select items to clean', alertNoItemTitle: 'No Items Selected',
-    confirmClean: 'About to clean {n} items.\nSafe items (caches/logs) will be permanently deleted to free disk space. Documents/media will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
-    confirmCleanTrash: 'About to permanently delete {n} trash items.\nThis action cannot be undone. Continue?', confirmCleanTrashTitle: 'Confirm Permanent Delete',
+    confirmClean: 'About to clean {n} items.\nSafe caches and logs will be deleted directly. System temporary files, documents, and media will be moved to Trash (recoverable). Continue?', confirmCleanTitle: 'Confirm Clean',
     catName: {
       system_cache: 'System Junk', app_cache: 'App Junk', log: 'Log Files',
-      download: 'Downloads', large_file: 'Large Files', trash: 'Trash',
+      download: 'Downloads', large_file: 'Large Files', system_temp: 'System Temporary Files',
       dev_cache: 'Dev Cache', document: 'Documents', media: 'Media',
     },
     catDesc: {
       system_cache: 'Temporary cache from macOS system apps', app_cache: 'Cache from Chrome, VSCode, etc.',
       log: 'Crash reports and logs older than 7 days', download: 'Old files in Downloads folder',
-      large_file: 'Search for files larger than 500MB', trash: 'Empty Trash to free space',
+      large_file: 'Search for files larger than 500MB', system_temp: 'Show temporary items under /private/tmp for you to review',
       dev_cache: 'AI tools and models, IDEs, dependencies, build artifacts, Git, Docker, and more', document: 'Scan document files under Home', media: 'Scan images, audio and video under Home',
     },
   },
@@ -116,12 +114,12 @@ const CAT_CFG = {
   log:          { icon: '&#9776;', color: '#8B5CF6', bg: '#F5F3FF' },
   download:     { icon: '&#8595;', color: '#10B981', bg: '#ECFDF5' },
   large_file:   { icon: '&#9650;', color: '#EF4444', bg: '#FEF2F2' },
-  trash:        { icon: '&#9003;', color: '#6B7280', bg: '#F3F4F6' },
+  system_temp:  { icon: '&#9201;', color: '#6B7280', bg: '#F3F4F6' },
   dev_cache:    { icon: '&#128187;', color: '#0EA5E9', bg: '#F0F9FF' },
   document:     { icon: '&#128196;', color: '#D97706', bg: '#FFFBEB' },
   media:        { icon: '&#127912;', color: '#EC4899', bg: '#FDF2F8' },
 };
-const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'dev_cache', 'download', 'document', 'media', 'large_file', 'trash'];
+const CAT_ORDER = ['system_cache', 'log', 'app_cache', 'dev_cache', 'download', 'document', 'media', 'large_file', 'system_temp'];
 
 let resultData = null;
 let scanSelections = {};
@@ -295,13 +293,12 @@ async function loadDisk() {
 async function loadPerm() {
   const r = await bridgeApi.getPermissions();
   const el = document.getElementById('perm-status');
-  if (r.fda && r.trash) {
+  if (r.fda) {
     el.innerHTML = '<span class="perm-ok">' + T('permOk') + '</span>';
     return;
   }
-  const warnText = !r.trash ? T('permTrashWarn') : T('permPartialWarn');
   el.innerHTML =
-    '<span class="perm-warn">&#9888; ' + warnText + '</span>' +
+    '<span class="perm-warn">&#9888; ' + T('permPartialWarn') + '</span>' +
     '<div><button class="perm-action" onclick="openPermissionSettings()">' + T('permOpen') + '</button></div>';
 }
 
@@ -444,43 +441,6 @@ function renderResult() {
       await loadResult();
     });
 
-    if (cat === 'trash') {
-      for (const sg of data.sub_groups) {
-        for (const f of sg.files) {
-          const frow = document.createElement('div');
-          frow.className = 'file-row';
-          frow.innerHTML =
-            '<input type="checkbox" class="file-cb"' + (f.selected ? ' checked' : '') +
-            ' data-path="' + escapeHtml(f.path) + '">' +
-            '<div class="file-path-wrap">' +
-              '<div class="file-path" title="' + escapeHtml(f.path) + '">' + escapeHtml(f.path_short) + '</div>' +
-              '<div class="file-hint">' + escapeHtml(f.description || '') + '</div>' +
-            '</div>' +
-            '<span class="file-size">' + f.size_display + '</span>' +
-            '<span class="file-actions">' +
-              '<button class="btn-mini" data-action="reveal" data-path="' + escapeHtml(f.path) + '">' + T('open') + '</button>' +
-            '</span>';
-          const fcb = frow.querySelector('.file-cb');
-          fcb.addEventListener('change', async (e) => {
-            e.stopPropagation();
-            await bridgeApi.selectPath(f.path, fcb.checked);
-            await loadResult();
-          });
-          frow.querySelectorAll('.btn-mini').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-              e.stopPropagation();
-              await bridgeApi.revealPath(btn.dataset.path);
-            });
-          });
-          body.appendChild(frow);
-        }
-      }
-      group.appendChild(header);
-      group.appendChild(body);
-      list.appendChild(group);
-      continue;
-    }
-
     for (const sg of data.sub_groups) {
       const subGroupKey = getSubGroupKey(cat, sg);
       const isSubGroupExpanded = expandedSubGroups.has(subGroupKey);
@@ -572,7 +532,6 @@ async function toggleAllResultSelection(state) {
 async function doClean() {
   // 从 resultData 收集所有服务端标记为 selected 的路径
   const paths = [];
-  let hasTrashItems = false;
   if (resultData) {
     for (const cat of CAT_ORDER) {
       const data = resultData.categories[cat];
@@ -581,7 +540,6 @@ async function doClean() {
         for (const f of sg.files) {
           if (f.selected && !paths.includes(f.path)) {
             paths.push(f.path);
-            if (cat === 'trash') hasTrashItems = true;
           }
         }
       }
@@ -594,8 +552,8 @@ async function doClean() {
     return;
   }
   const confirmed = await showConfirm(
-    (hasTrashItems ? T('confirmCleanTrash') : T('confirmClean')).replace('{n}', uniquePaths.length),
-    hasTrashItems ? T('confirmCleanTrashTitle') : T('confirmCleanTitle')
+    T('confirmClean').replace('{n}', uniquePaths.length),
+    T('confirmCleanTitle')
   );
   if (!confirmed) return;
 

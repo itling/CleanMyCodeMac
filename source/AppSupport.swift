@@ -216,13 +216,9 @@ enum DiskInfoService {
 enum PermissionService {
     private static let safariCache = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Caches/com.apple.Safari")
-    private static let trashPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".Trash")
-
     static func payload() -> [String: Any] {
         [
             "fda": canReadDirectory(at: safariCache),
-            "trash": canReadDirectory(at: trashPath),
         ]
     }
 
@@ -372,8 +368,8 @@ enum NativeText {
         case ("app_cache", _): return "App Junk"
         case ("log", "zh"): return "日志文件"
         case ("log", _): return "Log Files"
-        case ("trash", "zh"): return "废纸篓"
-        case ("trash", _): return "Trash"
+        case ("system_temp", "zh"): return "系统临时文件"
+        case ("system_temp", _): return "System Temporary Files"
         case ("dev_cache", "zh"): return "编程缓存"
         case ("dev_cache", _): return "Dev Cache"
         case ("document", "zh"): return "文档文件"
@@ -490,6 +486,23 @@ enum NativeText {
         lang == "zh" ? "旧日志（\(date)）" : "Old log (\(date))"
     }
 
+    static func systemTemporaryGroup(ageDays: Int, lang: String) -> String {
+        if ageDays >= 30 {
+            return lang == "zh" ? "30 天以上" : "30+ days old"
+        }
+        if ageDays >= 7 {
+            return lang == "zh" ? "7 天以上" : "7+ days old"
+        }
+        return lang == "zh" ? "近期临时文件" : "Recent temporary files"
+    }
+
+    static func systemTemporaryDescription(date: String, ageDays: Int, lang: String) -> String {
+        if lang == "zh" {
+            return "系统临时项目，最后修改于 \(date)（约 \(ageDays) 天前）。请确认不再需要后清理。"
+        }
+        return "System temporary item, last modified \(date) (about \(ageDays) days ago). Clean it only if it is no longer needed."
+    }
+
     static func devLangCacheDescription(langName: String, pathName: String, lang: String) -> String {
         lang == "zh" ? "\(langName) 缓存：\(pathName)" : "\(langName) cache: \(pathName)"
     }
@@ -604,23 +617,6 @@ enum NativeText {
         ]
     }
 
-    static func trashLabel(volume: String?, lang: String) -> String {
-        if let volume, !volume.isEmpty {
-            return lang == "zh" ? "外置磁盘废纸篓（\(volume)）" : "External Trash (\(volume))"
-        }
-        return lang == "zh" ? "废纸篓项目" : "Trash item"
-    }
-
-    static func trashNoAccessLabel(lang: String) -> String {
-        lang == "zh" ? "无法读取废纸篓" : "Trash access unavailable"
-    }
-
-    static func trashNoAccessDescription(lang: String) -> String {
-        lang == "zh"
-            ? "当前没有读取废纸篓的权限，请先授予相关访问权限。"
-            : "Trash contents could not be read. Grant the required access permissions first."
-    }
-
     static func groupSummary(count: Int, start: String?, end: String?, lang: String) -> String {
         if let start, let end {
             if start == end {
@@ -650,8 +646,8 @@ enum NativeText {
         case ("app_cache", _): return "Scanning app cache..."
         case ("log", "zh"): return "正在扫描日志文件..."
         case ("log", _): return "Scanning log files..."
-        case ("trash", "zh"): return "正在检查废纸篓..."
-        case ("trash", _): return "Checking trash..."
+        case ("system_temp", "zh"): return "正在扫描系统临时文件..."
+        case ("system_temp", _): return "Scanning system temporary files..."
         case ("dev_cache", "zh"): return "正在扫描编程缓存..."
         case ("dev_cache", _): return "Scanning dev caches..."
         case ("document", "zh"): return "正在扫描文档文件..."
@@ -745,21 +741,6 @@ enum NativePaths {
         return value.range(of: regex, options: .regularExpression) != nil
     }
 
-    static func trashLocations() -> [URL] {
-        var results = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")]
-        let uid = String(getuid())
-        let volumes = URL(fileURLWithPath: "/Volumes")
-        if let entries = try? FileManager.default.contentsOfDirectory(
-            at: volumes,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for entry in entries {
-                results.append(entry.appendingPathComponent(".Trashes/\(uid)"))
-            }
-        }
-        return results
-    }
 }
 
 enum NativeFileMetrics {
